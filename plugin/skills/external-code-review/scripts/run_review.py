@@ -31,10 +31,45 @@ class Phase(Enum):
     QUICK = "quick"
 
 
+class ExternalTool(Enum):
+    CODEX = "codex"
+    GEMINI = "gemini"
+
+
 class Signal(Enum):
     REVIEW_DONE = "<<<REVIEW_DONE>>>"
     CODEX_REVIEW_DONE = "<<<CODEX_REVIEW_DONE>>>"
     REVIEW_FAILED = "<<<REVIEW_FAILED>>>"
+
+
+def _detect_external_tool(preferred: str = "codex") -> ExternalTool:
+    """Detect which external review tool to use.
+
+    Priority:
+    1. If user explicitly requested 'gemini', use gemini
+    2. Try codex first (default)
+    3. Fall back to gemini if codex not found
+    4. If neither found, return codex (will fail with clear error)
+    """
+    if preferred == "gemini":
+        return ExternalTool.GEMINI
+
+    # Check if codex is available
+    try:
+        subprocess.run(["codex", "--version"], capture_output=True, timeout=10)
+        return ExternalTool.CODEX
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback: check if gemini is available
+    try:
+        subprocess.run(["gemini", "--version"], capture_output=True, timeout=10)
+        return ExternalTool.GEMINI
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Neither found, return codex (will produce a clear error when run)
+    return ExternalTool.CODEX
 
 
 @dataclass
@@ -47,6 +82,8 @@ class ReviewConfig:
     codex_sandbox: str = "read-only"
     codex_reasoning: str = "xhigh"
     timeout: int = 120
+    external_tool: str = "auto"  # "auto", "codex", or "gemini"
+    gemini_model: str = ""  # empty = use gemini default
 
 
 class ReviewRunner:
@@ -143,22 +180,15 @@ class ReviewRunner:
 
         return output, success, signal
 
+    def _resolve_external_tool(self) -> ExternalTool:
+        """Resolve which external tool to use for this review."""
+        return _detect_external_tool(self.config.external_tool)
+
     def run_codex(self, diff: str) -> tuple[str, bool]:
         """Run Codex CLI for external review."""
         self._log("Running Codex external review...", "🤖")
 
-        prompt = f"""Review the following code changes for bugs, security issues, and quality problems.
-
-CODE CHANGES:
-{diff}
-
-Report each issue with:
-- Location: file and line
-- Issue: description
-- Impact: severity
-- Fix: suggestion
-
-Report problems only - no positive observations."""
+        prompt = self._build_external_review_prompt(diff)
 
         # Use -c key=value for configuration (matches ralphex pattern)
         cmd = [
@@ -172,6 +202,48 @@ Report problems only - no positive observations."""
 
         output, success = self._run_command(cmd, timeout=600)  # 10 min for codex
         return output, success
+
+    def run_gemini(self, diff: str) -> tuple[str, bool]:
+        """Run Gemini CLI for external review."""
+        self._log("Running Gemini external review...", "💎")
+
+        prompt = self._build_external_review_prompt(diff)
+
+        cmd = [
+            "gemini",
+            "-p", prompt,
+            "-s",  # sandbox mode
+            "-o", "text",
+        ]
+
+        # Add model override if configured
+        if self.config.gemini_model:
+            cmd.extend(["-m", self.config.gemini_model])
+
+        output, success = self._run_command(cmd, timeout=600)  # 10 min for gemini
+        return output, success
+
+    def run_external_review(self, diff: str) -> tuple[str, bool]:
+        """Run external review using the resolved tool (codex or gemini)."""
+        tool = self._resolve_external_tool()
+        if tool == ExternalTool.GEMINI:
+            return self.run_gemini(diff)
+        return self.run_codex(diff)
+
+    def _build_external_review_prompt(self, diff: str) -> str:
+        """Build the review prompt for external tools."""
+        return f"""Review the following code changes for bugs, security issues, and quality problems.
+
+CODE CHANGES:
+{diff}
+
+Report each issue with:
+- Location: file and line
+- Issue: description
+- Impact: severity
+- Fix: suggestion
+
+Report problems only - no positive observations."""
 
     def run_first_review(self) -> bool:
         """Run first review phase with 5 agents."""
@@ -208,16 +280,18 @@ Report problems only - no positive observations."""
         return True
 
     def run_codex_review(self) -> bool:
-        """Run Codex external review phase."""
+        """Run external review phase (Codex or Gemini)."""
         if not self.config.codex_enabled:
-            self._log("Codex review disabled, skipping", "⏭️")
+            self._log("External review disabled, skipping", "⏭️")
             return True
 
-        self._log("Starting CODEX REVIEW phase", "🤖")
+        tool = self._resolve_external_tool()
+        tool_name = tool.value.capitalize()
+        self._log(f"Starting EXTERNAL REVIEW phase ({tool_name})", "🤖")
 
         diff = self._get_git_diff()
         if not diff:
-            self._log("No diff found, skipping codex review", "⏭️")
+            self._log("No diff found, skipping external review", "⏭️")
             return True
 
         codex_iterations = max(3, self.config.max_iterations // 5)
@@ -225,29 +299,29 @@ Report problems only - no positive observations."""
 
         while iteration < codex_iterations:
             iteration += 1
-            self._log(f"Codex iteration {iteration}/{codex_iterations}", "🔄")
+            self._log(f"{tool_name} iteration {iteration}/{codex_iterations}", "🔄")
 
-            # Run Codex
-            codex_output, codex_success = self.run_codex(diff)
+            # Run external tool
+            ext_output, ext_success = self.run_external_review(diff)
 
-            if not codex_success:
-                self._log("Codex execution failed, continuing anyway", "⚠️")
+            if not ext_success:
+                self._log(f"{tool_name} execution failed, continuing anyway", "⚠️")
                 return True
 
             print(f"\n{'='*60}")
-            print("CODEX OUTPUT:")
+            print(f"{tool_name.upper()} OUTPUT:")
             print('='*60)
-            print(codex_output[:3000] if len(codex_output) > 3000 else codex_output)
+            print(ext_output[:3000] if len(ext_output) > 3000 else ext_output)
             print('='*60)
 
-            # Check if codex found no issues
-            if not codex_output.strip() or "no issues" in codex_output.lower():
-                self._log("Codex found no issues!", "✅")
+            # Check if external tool found no issues
+            if not ext_output.strip() or "no issues" in ext_output.lower():
+                self._log(f"{tool_name} found no issues!", "✅")
                 return True
 
-            # Have Claude evaluate Codex findings
+            # Have Claude evaluate external findings
             eval_template = self._load_prompt("codex_eval")
-            eval_prompt = eval_template.replace("{{CODEX_OUTPUT}}", codex_output)
+            eval_prompt = eval_template.replace("{{CODEX_OUTPUT}}", ext_output)
             eval_prompt = self._build_prompt(eval_prompt)
 
             output, success, signal = self.run_claude(eval_prompt)
@@ -259,13 +333,13 @@ Report problems only - no positive observations."""
             print('='*60)
 
             if signal == Signal.CODEX_REVIEW_DONE:
-                self._log("Codex review complete!", "✅")
+                self._log(f"{tool_name} review complete!", "✅")
                 return True
 
             # Get fresh diff for next iteration
             diff = self._get_git_diff()
 
-        self._log(f"Codex review hit max iterations ({codex_iterations})", "⚠️")
+        self._log(f"{tool_name} review hit max iterations ({codex_iterations})", "⚠️")
         return True
 
     def run_final_review(self) -> bool:
@@ -369,9 +443,14 @@ def main():
     parser.add_argument("--max-iterations", "-i", type=int, default=10,
                         help="Max review iterations (default: 10)")
     parser.add_argument("--no-codex", action="store_true",
-                        help="Disable Codex external review")
+                        help="Disable external review (Codex/Gemini)")
     parser.add_argument("--codex-model", default="gpt-5.2-codex",
                         help="Codex model to use")
+    parser.add_argument("--external-tool", default="auto",
+                        choices=["auto", "codex", "gemini"],
+                        help="External review tool: auto (codex with gemini fallback), codex, or gemini")
+    parser.add_argument("--gemini-model", default="",
+                        help="Gemini model to use (default: gemini default)")
     parser.add_argument("--timeout", "-t", type=int, default=120,
                         help="Timeout per Claude call in seconds")
 
@@ -383,7 +462,9 @@ def main():
         max_iterations=args.max_iterations,
         codex_enabled=not args.no_codex,
         codex_model=args.codex_model,
-        timeout=args.timeout
+        timeout=args.timeout,
+        external_tool=args.external_tool,
+        gemini_model=args.gemini_model,
     )
 
     runner = ReviewRunner(config)

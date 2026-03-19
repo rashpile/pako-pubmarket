@@ -1,17 +1,20 @@
 ---
 name: external-code-review
-description: Multi-phase code review using external AI models (Claude CLI and Codex CLI) with parallel review agents. Use when user wants comprehensive code review, external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "review my code with external models", "run code review", "external code review", "multi-agent review", or "comprehensive code analysis". 
+description: Multi-phase code review using external AI models (Claude CLI, Codex CLI, and Gemini CLI) with parallel review agents. Use when user wants comprehensive code review, external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "review my code with external models", "run code review", "external code review", "multi-agent review", "comprehensive code analysis", or "review with gemini".
 ---
 
 # External Code Review
 
-Multi-phase code review system using external AI models (Claude and Codex) with parallel specialized agents. Inspired by the ralphex autonomous review pipeline.
+Multi-phase code review system using external AI models (Claude, Codex, and Gemini) with parallel specialized agents. Inspired by the ralphex autonomous review pipeline.
 
 ## Prerequisites
 
 Required CLI tools:
 - `claude` - Claude CLI (Anthropic)
-- `codex` - Codex CLI (OpenAI) - optional but recommended
+- `codex` - Codex CLI (OpenAI) - optional
+- `gemini` - Gemini CLI (Google) - optional, used as fallback when codex is not available
+
+At least one of `codex` or `gemini` is recommended for the external review phase. If neither is available, the external review phase will be skipped.
 
 ## Model Configuration
 
@@ -32,14 +35,24 @@ Supported config fields:
 |-------|--------|
 | `claude_model` | Pass `--model <value>` to `claude` CLI |
 | `codex_model` | Pass `-c 'model="<value>"'` to `codex exec` |
+| `gemini_model` | Pass `-m <value>` to `gemini` CLI |
+| `external_tool` | Which external tool to use: `auto` (default), `codex`, or `gemini` |
 
 Example config:
 ```json
 {
   "claude_model": "sonnet",
-  "codex_model": "gpt-5.2-codex"
+  "codex_model": "gpt-5.2-codex",
+  "gemini_model": "",
+  "external_tool": "auto"
 }
 ```
+
+**External tool resolution (`auto` mode)**:
+1. If user explicitly requests `gemini`, use Gemini CLI
+2. Try Codex CLI first (default)
+3. If Codex is not installed, fall back to Gemini CLI
+4. If neither is found, attempt Codex (will fail with clear error)
 
 If a field is absent or the config file doesn't exist, omit the model flag entirely for that CLI.
 
@@ -78,12 +91,13 @@ Launch 5 specialized agents simultaneously:
 | simplification | Over-engineering, excessive abstraction, unused code |
 | documentation | README, CLAUDE.md, breaking changes |
 
-### Phase 2: External Review (Codex)
+### Phase 2: External Review (Codex or Gemini)
 
-- Codex analyzes code with `read-only` sandbox
-- Independent perspective from different model
-- Claude evaluates Codex findings
+- External model (Codex or Gemini) analyzes code in sandbox mode
+- Independent perspective from different model family
+- Claude evaluates external findings
 - Categorize as: Valid / Invalid / Irrelevant
+- Tool selection: auto-detects available CLI, or user can specify `--external-tool gemini`
 
 ### Phase 3: Final Review (2 Agents)
 
@@ -166,16 +180,19 @@ For each finding:
 
 Loop until zero confirmed issues found.
 
-### 4. Run Codex External Review
+### 4. Run External Review (Codex or Gemini)
 
 ```bash
+# Auto-detect tool (codex first, gemini fallback)
 python scripts/run_review.py codex --branch main
+
+# Explicitly use gemini
+python scripts/run_review.py codex --branch main --external-tool gemini
 ```
 
-Or manually — check config for model override, otherwise use Codex default:
+Or manually with Codex:
 
 ```bash
-# If ~/.claude/external-code-review/config.json has codex_model set:
 CODEX_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('codex_model',''))" 2>/dev/null)
 
 if [ -n "$CODEX_MODEL" ]; then
@@ -188,6 +205,15 @@ else
     -c model_reasoning_effort=xhigh \
     "Review code changes: $(git diff main...HEAD)"
 fi
+```
+
+Or manually with Gemini:
+
+```bash
+GEMINI_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('gemini_model',''))" 2>/dev/null)
+
+gemini -p "Review code changes: $(git diff main...HEAD)" \
+  -s -o text ${GEMINI_MODEL:+-m "$GEMINI_MODEL"}
 ```
 
 ### 5. Evaluate Codex Findings
@@ -282,10 +308,12 @@ When invoking review, consider:
 | branch | main | Base branch for diff |
 | max_iterations | 10 | Max review loops |
 | claude_model | (claude default) | Claude model — uses Claude default unless overridden in `~/.claude/external-code-review/config.json` |
-| codex_enabled | true | Run Codex phase |
+| codex_enabled | true | Run external review phase |
 | codex_model | (codex default) | Codex model — uses Codex default unless overridden in `~/.claude/external-code-review/config.json` |
 | codex_sandbox | read-only | Codex sandbox mode |
 | codex_reasoning | xhigh | Codex reasoning effort level |
+| external_tool | auto | External tool selection: `auto` (codex→gemini fallback), `codex`, or `gemini` |
+| gemini_model | (gemini default) | Gemini model — uses Gemini default unless overridden in config |
 
 ## Example Session
 
