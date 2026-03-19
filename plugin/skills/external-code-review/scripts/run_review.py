@@ -184,11 +184,11 @@ class ReviewRunner:
         """Resolve which external tool to use for this review."""
         return _detect_external_tool(self.config.external_tool)
 
-    def run_codex(self, diff: str) -> tuple[str, bool]:
+    def run_codex(self, diff: str, previous_context: str = "") -> tuple[str, bool]:
         """Run Codex CLI for external review."""
         self._log("Running Codex external review...", "🤖")
 
-        prompt = self._build_external_review_prompt(diff)
+        prompt = self._build_external_review_prompt(diff, previous_context)
 
         # Use -c key=value for configuration (matches ralphex pattern)
         cmd = [
@@ -203,11 +203,11 @@ class ReviewRunner:
         output, success = self._run_command(cmd, timeout=600)  # 10 min for codex
         return output, success
 
-    def run_gemini(self, diff: str) -> tuple[str, bool]:
+    def run_gemini(self, diff: str, previous_context: str = "") -> tuple[str, bool]:
         """Run Gemini CLI for external review."""
         self._log("Running Gemini external review...", "💎")
 
-        prompt = self._build_external_review_prompt(diff)
+        prompt = self._build_external_review_prompt(diff, previous_context)
 
         cmd = [
             "gemini",
@@ -223,15 +223,27 @@ class ReviewRunner:
         output, success = self._run_command(cmd, timeout=600)  # 10 min for gemini
         return output, success
 
-    def run_external_review(self, diff: str) -> tuple[str, bool]:
+    def run_external_review(self, diff: str, previous_context: str = "") -> tuple[str, bool]:
         """Run external review using the resolved tool (codex or gemini)."""
         tool = self._resolve_external_tool()
         if tool == ExternalTool.GEMINI:
-            return self.run_gemini(diff)
-        return self.run_codex(diff)
+            return self.run_gemini(diff, previous_context)
+        return self.run_codex(diff, previous_context)
 
-    def _build_external_review_prompt(self, diff: str) -> str:
+    def _build_external_review_prompt(self, diff: str, previous_context: str = "") -> str:
         """Build the review prompt for external tools."""
+        ctx_section = ""
+        if previous_context:
+            ctx_section = f"""
+
+## Previous Review Context
+
+The following findings were reported in prior iterations and dismissed by the evaluator.
+Do NOT re-report these unless you have new evidence:
+
+{previous_context}
+"""
+
         return f"""Review the following code changes for bugs, security issues, and quality problems.
 
 CODE CHANGES:
@@ -243,7 +255,7 @@ Report each issue with:
 - Impact: severity
 - Fix: suggestion
 
-Report problems only - no positive observations."""
+Report problems only - no positive observations.{ctx_section}"""
 
     def run_first_review(self) -> bool:
         """Run first review phase with 5 agents."""
@@ -296,13 +308,14 @@ Report problems only - no positive observations."""
 
         codex_iterations = max(3, self.config.max_iterations // 5)
         iteration = 0
+        previous_context = ""
 
         while iteration < codex_iterations:
             iteration += 1
             self._log(f"{tool_name} iteration {iteration}/{codex_iterations}", "🔄")
 
-            # Run external tool
-            ext_output, ext_success = self.run_external_review(diff)
+            # Run external tool (with previous context so it avoids re-reporting dismissed findings)
+            ext_output, ext_success = self.run_external_review(diff, previous_context)
 
             if not ext_success:
                 self._log(f"{tool_name} execution failed, continuing anyway", "⚠️")
@@ -320,8 +333,12 @@ Report problems only - no positive observations."""
                 return True
 
             # Have Claude evaluate external findings
-            eval_template = self._load_prompt("codex_eval")
-            eval_prompt = eval_template.replace("{{CODEX_OUTPUT}}", ext_output)
+            eval_template = self._load_prompt("external_eval")
+            if not eval_template:
+                # Fallback to legacy prompt name
+                eval_template = self._load_prompt("codex_eval")
+            eval_prompt = eval_template.replace("{{EXTERNAL_OUTPUT}}", ext_output)
+            eval_prompt = eval_prompt.replace("{{PREVIOUS_REVIEW_CONTEXT}}", previous_context)
             eval_prompt = self._build_prompt(eval_prompt)
 
             output, success, signal = self.run_claude(eval_prompt)
@@ -335,6 +352,11 @@ Report problems only - no positive observations."""
             if signal == Signal.CODEX_REVIEW_DONE:
                 self._log(f"{tool_name} review complete!", "✅")
                 return True
+
+            # No signal: either fixes were applied or all findings dismissed.
+            # Capture Claude's evaluation as context for next iteration
+            # so the external tool doesn't re-report dismissed findings.
+            previous_context = output[:2000] if len(output) > 2000 else output
 
             # Get fresh diff for next iteration
             diff = self._get_git_diff()

@@ -1,6 +1,6 @@
 # External Code Review
 
-Multi-phase code review system using external AI models (Claude and Codex) with parallel specialized agents. Inspired by the [ralphex](https://github.com/anthropics/ralphex) autonomous review pipeline.
+Multi-phase code review system using external AI models (Claude, Codex, and Gemini) with parallel specialized agents. Inspired by the [ralphex](wait. ) autonomous review pipeline.
 
 ## Structure
 
@@ -16,7 +16,7 @@ external-code-review/
 │   └── documentation.txt         # Documentation updates review
 ├── prompts/
 │   ├── review_first.txt          # Phase 1: Comprehensive (5 agents)
-│   ├── codex_eval.txt            # Phase 2: Codex evaluation
+│   ├── external_eval.txt          # Phase 2: External tool evaluation (Codex/Gemini)
 │   └── review_final.txt          # Phase 3: Critical issues (2 agents)
 └── scripts/
     └── run_review.py             # Review orchestration script
@@ -27,7 +27,8 @@ external-code-review/
 Install and configure these CLI tools:
 
 - **claude** - [Claude CLI](https://docs.anthropic.com/claude-code) (Anthropic) - required
-- **codex** - [Codex CLI](https://github.com/openai/codex) (OpenAI) - optional but recommended
+- **codex** - [Codex CLI](https://github.com/openai/codex) (OpenAI) - optional
+- **gemini** - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (Google) - optional, fallback when codex unavailable
 
 ## Model Configuration
 
@@ -82,14 +83,15 @@ Launches 5 specialized agents **in parallel**:
 | **simplification** | Over-engineering, excessive abstraction, premature optimization |
 | **documentation** | README updates, CLAUDE.md, breaking changes |
 
-### Phase 2: Codex External Review
+### Phase 2: External Review (Codex or Gemini)
 
-- Codex analyzes code in `read-only` sandbox (uses Codex default model, configurable via config)
-- Provides independent perspective from a different model
-- Claude evaluates Codex findings and categorizes as:
-  - **Valid** - Fix the issue
-  - **Invalid** - Explain why it doesn't apply
-  - **Irrelevant** - Out of scope or pre-existing
+- External tool (Codex or Gemini) analyzes code in sandbox mode
+- Auto-detects available tool: codex first, gemini fallback. Use `--external-tool gemini` to force Gemini.
+- Provides independent perspective from a different model family
+- Claude evaluates findings with three-path logic:
+  - **Valid issues found** → fix them, loop re-runs external tool to verify
+  - **All findings dismissed** → loop re-runs with dismissal context to avoid re-reporting
+  - **External tool found nothing** → commit fixes, done
 
 ### Phase 3: Final Review (2 Agents)
 
@@ -126,8 +128,10 @@ Options:
   --branch, -b        Base branch for diff (default: main)
   --goal, -g          Description of what was implemented
   --max-iterations, -i  Max review iterations (default: 10)
-  --no-codex          Disable Codex external review
+  --no-codex          Disable external review (Codex/Gemini)
   --codex-model       Codex model override (default: codex default)
+  --external-tool     External tool: auto (default), codex, or gemini
+  --gemini-model      Gemini model override (default: gemini default)
   --timeout, -t       Timeout per Claude call in seconds (default: 120)
 ```
 
@@ -163,7 +167,7 @@ Edit files in `agents/` to modify review focus areas.
 Edit files in `prompts/` to change the review workflow:
 
 - `review_first.txt` - Modify which agents run or how findings are processed
-- `codex_eval.txt` - Change how Codex findings are evaluated
+- `external_eval.txt` - Change how external tool findings are evaluated
 - `review_final.txt` - Adjust final review criteria
 
 ## Example Session
@@ -201,3 +205,9 @@ python scripts/run_review.py full \
 - Codex runs in read-only sandbox for safety
 - Each iteration verifies previous fixes didn't introduce new issues
 - Tests and linter must pass after each fix batch
+
+## Credits
+
+Agent prompts (`agents/*.txt`) are sourced from [ralphex](https://github.com/umputun/ralphex) by [Umputun](https://github.com/umputun), licensed under the MIT License. The review pipeline design is inspired by ralphex's autonomous code review approach.
+
+Copyright (c) 2026 Umputun — see [ralphex LICENSE](https://github.com/umputun/ralphex/blob/master/LICENSE) for details.

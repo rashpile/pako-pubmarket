@@ -1,6 +1,6 @@
 ---
 name: external-code-review
-description: Multi-phase code review using external AI models (Claude CLI, Codex CLI, and Gemini CLI) with parallel review agents. Use when user wants comprehensive code review, external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "review my code with external models", "run code review", "external code review", "multi-agent review", "comprehensive code analysis", or "review with gemini".
+description: Multi-phase code review using external AI models (Claude CLI, Codex CLI, and Gemini CLI) with parallel review agents. Use when user wants external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "external code review", "multi-agent review", "review with external models", "review with gemini", or "comprehensive code analysis".
 ---
 
 # External Code Review
@@ -216,18 +216,18 @@ gemini -p "Review code changes: $(git diff main...HEAD)" \
   -s -o text ${GEMINI_MODEL:+-m "$GEMINI_MODEL"}
 ```
 
-### 5. Evaluate Codex Findings
+### 5. Evaluate External Findings
 
-Pass Codex output to Claude for evaluation (add `--model <claude_model>` if configured):
+Pass external tool output to Claude for evaluation (add `--model <claude_model>` if configured):
 
 ```bash
-claude -p "$(cat prompts/codex_eval.txt)" ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"}
+claude -p "$(cat prompts/external_eval.txt)" ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"}
 ```
 
-For each Codex finding:
-- **Valid** - Fix it
-- **Invalid** - Document why
-- **Irrelevant** - Skip (pre-existing, out of scope)
+Three-path evaluation logic:
+- **Valid issues found** → fix them, no signal, loop re-runs external tool to verify
+- **All findings dismissed** → no signal, loop re-runs with dismissal explanations as context
+- **External tool found nothing** → commit fixes, emit `<<<CODEX_REVIEW_DONE>>>`
 
 ### 6. Run Final Review
 
@@ -296,7 +296,7 @@ See `agents/` directory for full agent prompts:
 See `prompts/` directory:
 
 - `prompts/review_first.txt` - Phase 1 comprehensive review
-- `prompts/codex_eval.txt` - Codex findings evaluation
+- `prompts/external_eval.txt` - External tool findings evaluation (Codex/Gemini)
 - `prompts/review_final.txt` - Phase 3 critical review
 
 ## Configuration Options
