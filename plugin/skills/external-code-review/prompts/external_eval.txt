@@ -1,5 +1,5 @@
 # External Review Evaluation Prompt
-# Used when Claude evaluates output from an external review tool (Codex, Gemini, etc.)
+# Used when Claude evaluates output from an external review tool (Codex, Gemini, or Pi)
 #
 # Variables to replace:
 #   {{GOAL}} - description of what was implemented
@@ -54,4 +54,4 @@ Do NOT reject issues just because they existed before this branch — fix them a
 
 CRITICAL: The CODEX_REVIEW_DONE signal means "the external tool found nothing to fix". Only output it when the tool itself reported no issues. If you fixed anything, do NOT output the signal.
 
-CRITICAL: Never run external review tools (codex, gemini) yourself. The external loop handles tool execution.
+CRITICAL: Never run external review tools (codex, gemini, pi) yourself. The external loop handles tool execution.

@@ -12,19 +12,19 @@ claude plugin add https://github.com/rashpile/pako-pubmarket
 
 ### [external-code-review](plugin/skills/external-code-review/)
 
-Automated multi-phase code review that catches bugs, security issues, and over-engineering by combining Claude with an independent external model (Codex or Gemini). Finds issues, applies fixes, and commits them — iterating until clean.
+Automated multi-phase code review that catches bugs, security issues, and over-engineering by combining Claude with an independent external model (Codex, Gemini, or Pi). Finds issues, applies fixes, and commits them — iterating until clean.
 
 **How it works:**
 
 1. **First Review** — 5 specialized agents run in parallel (quality, implementation, testing, simplification, documentation), each analyzing your diff from a different angle
-2. **External Review** — an independent model (Codex or Gemini) reviews the same changes, and Claude evaluates its findings to filter false positives
+2. **External Review** — an independent model (Codex, Gemini, or Pi) reviews the same changes, and Claude evaluates its findings to filter false positives
 3. **Final Review** — focused pass on critical/major issues only
 
 **Why use it:**
 - Multi-model review catches issues a single model misses
 - Parallel agents cover more ground (security, tests, docs, over-engineering) in one pass
 - Iterative loop: finds issues → fixes → re-verifies until clean
-- Works with Codex, Gemini, or both — auto-detects what's installed
+- Works with Codex, Gemini, Pi, or any combination — auto-detects what's installed
 
 **Usage:** Ask Claude Code for an "external code review" or "multi-agent review". For a faster pass covering critical issues only, ask for a "quick external code review".
 
