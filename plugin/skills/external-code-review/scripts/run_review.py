@@ -82,7 +82,7 @@ class ExternalReviewRunner:
         print(f"{prefix} {message}", file=sys.stderr)
 
     def _run_command(self, cmd: list, timeout: int = 600) -> tuple[str, bool]:
-        """Run a shell command and return output + success."""
+        """Run a shell command and return (stdout, success). Stderr logged separately."""
         try:
             result = subprocess.run(
                 cmd,
@@ -90,8 +90,9 @@ class ExternalReviewRunner:
                 text=True,
                 timeout=timeout
             )
-            output = result.stdout.strip() or result.stderr.strip()
-            return output, result.returncode == 0
+            if result.stderr.strip():
+                self._log(f"stderr: {result.stderr.strip()[:500]}", "⚠️")
+            return result.stdout.strip(), result.returncode == 0
         except subprocess.TimeoutExpired:
             return f"Command timed out after {timeout}s", False
         except FileNotFoundError:
@@ -100,13 +101,13 @@ class ExternalReviewRunner:
             return str(e), False
 
     def _get_git_diff(self) -> str:
-        """Get git diff against base branch."""
+        """Get git diff against base branch. Returns None on error, empty string if no changes."""
         output, success = self._run_command([
             "git", "diff", f"{self.config.branch}...HEAD"
         ])
         if not success:
-            self._log(f"git diff failed: {output}", "⚠️")
-            return ""
+            self._log(f"git diff failed: {output}", "❌")
+            return None
         return output
 
     def _build_review_prompt(self, diff: str) -> str:
@@ -142,10 +143,13 @@ Report problems only - no positive observations.{ctx_section}"""
         cmd = [
             "codex", "exec",
             "--sandbox", self.config.codex_sandbox,
-            "-c", f'model="{self.config.codex_model}"',
+        ]
+        if self.config.codex_model:
+            cmd.extend(["-c", f'model="{self.config.codex_model}"'])
+        cmd.extend([
             "-c", f"model_reasoning_effort={self.config.codex_reasoning}",
             prompt
-        ]
+        ])
         return self._run_command(cmd)
 
     def run_gemini(self, prompt: str) -> tuple[str, bool]:
@@ -172,8 +176,10 @@ Report problems only - no positive observations.{ctx_section}"""
     def run(self) -> bool:
         """Run the external review and print findings to stdout."""
         diff = self._get_git_diff()
+        if diff is None:
+            return False  # git error, already logged
         if not diff:
-            self._log("No diff found", "⚠️")
+            self._log("No diff found — nothing to review", "⚠️")
             return True
 
         prompt = self._build_review_prompt(diff)
@@ -245,8 +251,8 @@ def main():
     parser.add_argument("--pi-thinking", default=None,
                         choices=["off", "minimal", "low", "medium", "high", "xhigh"],
                         help="Pi thinking level (default: high)")
-    parser.add_argument("--pi-options", nargs="*", default=None,
-                        help="Additional Pi CLI options")
+    parser.add_argument("--pi-options", default=None,
+                        help="Additional Pi CLI options as JSON array (e.g. '[\"--verbose\"]')")
     parser.add_argument("--previous-context", default="",
                         help="Dismissed findings from prior iterations (passed to external tool)")
 
@@ -261,9 +267,15 @@ def main():
         except Exception as e:
             print(f"Warning: could not load config from {config_path}: {e}", file=sys.stderr)
 
-    # Validate pi_options
+    # Validate pi_options (CLI arg is JSON string, config is list)
+    cli_pi_options = None
+    if args.pi_options is not None:
+        try:
+            cli_pi_options = json.loads(args.pi_options)
+        except json.JSONDecodeError:
+            print("Warning: --pi-options must be a JSON array, ignoring", file=sys.stderr)
     raw_pi_options = _validate_pi_options(
-        args.pi_options if args.pi_options is not None else file_config.get("pi_options", None)
+        cli_pi_options if cli_pi_options is not None else file_config.get("pi_options", None)
     )
 
     # Validate pi_thinking
