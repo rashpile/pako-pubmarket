@@ -1,6 +1,6 @@
 # External Code Review
 
-Multi-phase code review system using external AI models (Claude, Codex, and Gemini) with parallel specialized agents. Inspired by the [ralphex](wait. ) autonomous review pipeline.
+Multi-phase code review system using external AI models (Claude, Codex, and Gemini) with parallel specialized agents. Inspired by the [ralphex](https://github.com/umputun/ralphex) autonomous review pipeline.
 
 ## Structure
 
@@ -30,18 +30,34 @@ Install and configure these CLI tools:
 - **codex** - [Codex CLI](https://github.com/openai/codex) (OpenAI) - optional
 - **gemini** - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (Google) - optional, fallback when codex unavailable
 
-## Model Configuration
+## Configuration
 
-Both CLIs use their defaults unless overridden in `~/.claude/external-code-review/config.json`:
+Optional config file at `~/.claude/external-code-review/config.json`:
 
 ```json
 {
   "claude_model": "sonnet",
-  "codex_model": "gpt-5.2-codex"
+  "codex_model": "gpt-5.2-codex",
+  "gemini_model": "",
+  "external_tool": "auto"
 }
 ```
 
-Fields are optional — omit to use the CLI default.
+All fields are optional — omit to use defaults.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `claude_model` | CLI default | Model for `claude` CLI (`--model` flag) |
+| `codex_model` | CLI default | Model for `codex` CLI |
+| `gemini_model` | CLI default | Model for `gemini` CLI (`-m` flag) |
+| `external_tool` | `auto` | Which external tool to use: `auto`, `codex`, or `gemini` |
+
+**External tool resolution (`auto` mode):**
+1. Try Codex CLI first
+2. If Codex is not installed, fall back to Gemini CLI
+3. If user explicitly asks for gemini (e.g., "review with gemini"), use Gemini regardless
+
+Set `external_tool` to `codex` or `gemini` to skip auto-detection and always use a specific tool.
 
 ## Quick Start
 
@@ -190,8 +206,8 @@ python scripts/run_review.py full \
 # 🧠 Running Claude review...
 # ... agent findings ...
 # ✅ First review complete - no issues found!
-# 🤖 Starting CODEX REVIEW phase
-# ... codex analysis ...
+# 🤖 Starting EXTERNAL REVIEW phase (Codex)
+# ... external analysis ...
 # ✅ Codex review complete!
 # 🎯 Starting FINAL REVIEW phase (2 agents)
 # ... final verification ...

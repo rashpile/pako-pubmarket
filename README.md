@@ -28,6 +28,8 @@ Automated multi-phase code review that catches bugs, security issues, and over-e
 
 **Usage:** Ask Claude Code for an "external code review" or "multi-agent review". For a faster pass covering critical issues only, ask for a "quick external code review".
 
+See the [full skill documentation](plugin/skills/external-code-review/README.md) for configuration, CLI options, and customization.
+
 Agent prompts are sourced from [ralphex](https://github.com/umputun/ralphex) by [Umputun](https://github.com/umputun).
 
 ## Structure
