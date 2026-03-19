@@ -12,7 +12,7 @@ claude plugin add https://github.com/rashpile/pako-pubmarket
 
 ### [external-code-review](plugin/skills/external-code-review/)
 
-Automated multi-phase code review that catches bugs, security issues, and over-engineering by combining Claude with an independent external model (Codex or Gemini). Runs on your feature branch and commits fixes automatically.
+Automated multi-phase code review that catches bugs, security issues, and over-engineering by combining Claude with an independent external model (Codex or Gemini). Finds issues, applies fixes, and commits them — iterating until clean.
 
 **How it works:**
 
