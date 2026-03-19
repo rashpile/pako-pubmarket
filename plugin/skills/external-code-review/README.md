@@ -117,15 +117,22 @@ Launches 5 specialized agents **in parallel**:
 
 ## Signal-Based Completion
 
-The review loop uses signals to determine when to stop:
+The review script (`run_review.py`) and the Claude CLI prompts communicate through signal strings. The script launches `claude -p "<prompt>"` as a subprocess, captures stdout, and scans it for specific signal strings to decide whether to keep iterating or stop.
 
-| Signal | Meaning |
-|--------|---------|
-| `<<<REVIEW_DONE>>>` | Zero issues found this iteration |
-| `<<<CODEX_REVIEW_DONE>>>` | Codex found no issues |
-| `<<<REVIEW_FAILED>>>` | Cannot fix issues (needs human help) |
+| Signal | Meaning | Script action |
+|--------|---------|---------------|
+| `<<<REVIEW_DONE>>>` | Zero issues found this iteration | Stop loop — review is clean |
+| `<<<CODEX_REVIEW_DONE>>>` | External tool found no issues | Stop loop — external review done |
+| `<<<REVIEW_FAILED>>>` | Issues found but cannot be fixed | Stop loop — needs human help |
+| No signal | Issues were found and fixed | Continue loop — re-verify fixes |
 
-**Important**: `REVIEW_DONE` means "found zero issues", NOT "finished fixing". If issues were fixed, the loop continues to verify the fixes didn't introduce new problems.
+The prompts tell Claude exactly when to emit each signal:
+
+- **Path A** — no issues found → output `<<<REVIEW_DONE>>>`
+- **Path B** — issues found and fixed → stop, no signal (loop runs again to verify)
+- **Path C** — issues found but can't fix → output `<<<REVIEW_FAILED>>>`
+
+`REVIEW_DONE` means "found zero issues", NOT "finished fixing". If issues were fixed, the loop continues to verify the fixes didn't introduce new problems.
 
 ## CLI Options
 
