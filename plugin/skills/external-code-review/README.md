@@ -51,11 +51,11 @@ All fields are optional — omit to use defaults.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `claude_model` | CLI default | Model for `claude` CLI (`--model` flag) |
-| `codex_model` | CLI default | Model for `codex` CLI |
+| `codex_model` | `gpt-5.2-codex` | Model for `codex` CLI |
 | `gemini_model` | CLI default | Model for `gemini` CLI (`-m` flag) |
 | `pi_model` | CLI default | Model for `pi` CLI (`--model` flag, supports `provider/model` format) |
 | `pi_thinking` | `high` | Thinking level for `pi` CLI: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `pi_options` | (none) | Additional `pi` CLI options as list of strings, e.g. `["--provider", "openai"]`. Options starting with `--tools`, `--extensions`, `--skills`, `--no-extensions`, or `--no-skills` are rejected (safety flags are enforced automatically). |
+| `pi_options` | (none) | Additional `pi` CLI options as list of strings, e.g. `["--provider", "openai"]`. Options starting with `--tools`, `--extensions`, `--skills`, `--no-extensions`, `--no-skills`, `--prompt`, `--model`, or `--thinking` are rejected, as are `-p` and bare `--` (safety flags and dedicated config fields are enforced automatically). |
 | `external_tool` | `auto` | Which external tool to use: `auto`, `codex`, `gemini`, or `pi` |
 
 **External tool resolution (`auto` mode):**
@@ -235,6 +235,8 @@ python scripts/run_review.py full \
 
 - Pre-existing issues (linter errors, failed tests) are fixed too
 - Codex runs in read-only sandbox for safety
+- Pi runs with restricted tools (read, grep, find, ls) and extensions/skills disabled
+- Gemini runs in sandbox mode (-s flag)
 - Each iteration verifies previous fixes didn't introduce new issues
 - Tests and linter must pass after each fix batch
 

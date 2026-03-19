@@ -239,12 +239,13 @@ class ReviewRunner:
         if self.config.pi_model:
             cmd.extend(["--model", self.config.pi_model])
 
-        # Safety flags: always present, placed before user options so deny-list is the primary control
-        cmd.extend(["--tools", "read,grep,find,ls", "--no-extensions", "--no-skills"])
-
         # Additional custom options (validated by deny-list at config load time)
+        # Placed BEFORE safety flags so hardcoded restrictions always win
         if self.config.pi_options:
             cmd.extend(self.config.pi_options)
+
+        # Safety flags: always last so they override any user options
+        cmd.extend(["--tools", "read,grep,find,ls", "--no-extensions", "--no-skills"])
 
         output, success = self._run_command(cmd, timeout=600)  # 10 min for pi
         return output, success
@@ -362,6 +363,9 @@ Report problems only - no positive observations.{ctx_section}"""
 
             # Have Claude evaluate external findings
             eval_template = self._load_prompt("external_eval")
+            if not eval_template:
+                # Fallback to legacy prompt name
+                eval_template = self._load_prompt("codex_eval")
             if not eval_template:
                 self._log("Could not load external_eval.txt prompt", "❌")
                 return False
@@ -506,6 +510,8 @@ def main():
     parser.add_argument("--pi-thinking", default=None,
                         choices=["off", "minimal", "low", "medium", "high", "xhigh"],
                         help="Pi thinking level: off, minimal, low, medium, high, xhigh (default: high)")
+    parser.add_argument("--pi-options", nargs="*", default=None,
+                        help="Additional Pi CLI options (e.g. --pi-options --verbose --debug)")
     parser.add_argument("--timeout", "-t", type=int, default=120,
                         help="Timeout per Claude call in seconds")
 
@@ -520,18 +526,22 @@ def main():
         except Exception as e:
             print(f"Warning: could not load config from {config_path}: {e}", file=sys.stderr)
 
-    # Validate pi_options from config file
-    raw_pi_options = file_config.get("pi_options", None)
+    # Validate pi_options from CLI args or config file (CLI takes precedence)
+    raw_pi_options = args.pi_options if args.pi_options is not None else file_config.get("pi_options", None)
     if raw_pi_options is not None:
         if not isinstance(raw_pi_options, list) or not all(isinstance(o, str) for o in raw_pi_options):
             print("Warning: pi_options in config.json must be a list of strings, ignoring", file=sys.stderr)
             raw_pi_options = None
         else:
             _denied_prefixes = (
-                "--tools", "--no-extensions", "--no-skills", "--extensions", "--skills",
-                "--prompt", "--model", "--thinking",
+                "--tools", "--no-tools", "--no-extensions", "--no-skills",
+                "--extensions", "--skills",
+                "--prompt", "--system-prompt", "--append-system-prompt",
+                "--model", "--thinking",
+                "--extension", "--skill", "--prompt-template",
+                "--no-prompt-templates",
             )
-            _denied_exact = {"--", "-p"}
+            _denied_exact = {"--", "-p", "-e", "-ne", "-ns", "-np"}
             has_denied = any(
                 o.strip() in _denied_exact or any(o.strip().startswith(p) for p in _denied_prefixes)
                 for o in raw_pi_options

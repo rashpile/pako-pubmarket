@@ -39,7 +39,7 @@ Supported config fields:
 | `gemini_model` | Pass `-m <value>` to `gemini` CLI |
 | `pi_model` | Pass `--model <value>` to `pi` CLI (supports `provider/model` format, e.g. `anthropic/claude-sonnet-4-20250514`) |
 | `pi_thinking` | Pass `--thinking <value>` to `pi` CLI (default: `high`). Values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `pi_options` | Additional CLI options as a list of strings, e.g. `["--provider", "openai"]`. Options starting with `--tools`, `--extensions`, `--skills`, `--no-extensions`, or `--no-skills` are rejected (safety flags are enforced automatically). |
+| `pi_options` | Additional CLI options as a list of strings, e.g. `["--provider", "openai"]`. Options starting with `--tools`, `--extensions`, `--skills`, `--no-extensions`, `--no-skills`, `--prompt`, `--model`, or `--thinking` are rejected, as are `-p` and bare `--` (safety flags and dedicated config fields are enforced automatically). |
 | `external_tool` | Which external tool to use: `auto` (default), `codex`, `gemini`, or `pi` |
 
 Example config:
@@ -236,8 +236,8 @@ PI_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 
 PI_THINKING=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('pi_thinking','high'))" 2>/dev/null)
 
 pi -p "Review code changes: $(git diff main...HEAD)" \
-  --tools read,grep,find,ls --no-extensions --no-skills \
-  --thinking "${PI_THINKING:-high}" ${PI_MODEL:+--model "$PI_MODEL"}
+  --thinking "${PI_THINKING:-high}" ${PI_MODEL:+--model "$PI_MODEL"} \
+  --tools read,grep,find,ls --no-extensions --no-skills
 ```
 
 ### 5. Evaluate External Findings
@@ -367,5 +367,7 @@ python scripts/run_review.py report
 - Run tests + linter after each fix batch
 - Commit fixes with descriptive messages
 - Codex runs in read-only sandbox for safety
+- Pi runs with restricted tools (read, grep, find, ls) and extensions/skills disabled
+- Gemini runs in sandbox mode (-s flag)
 - Final review ignores style/minor issues (critical/major only)
 - Pre-existing issues should still be fixed if found
