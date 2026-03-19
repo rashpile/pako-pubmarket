@@ -1,51 +1,28 @@
 ---
 name: external-code-review
-description: Multi-phase code review using external AI models (Claude CLI, Codex CLI, Gemini CLI, and Pi CLI) with parallel review agents. Use when user wants external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "external code review", "multi-agent review", "review with external models", "review with gemini", "review with pi", or "comprehensive code analysis".
+description: Multi-phase code review using external AI models (Codex CLI, Gemini CLI, and Pi CLI) with parallel review agents. Use when user wants external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "external code review", "multi-agent review", "review with external models", "review with gemini", "review with pi", or "comprehensive code analysis".
+allowed-tools: Bash(git *), Bash(python *), Read, Grep, Glob, Agent
 ---
 
 # External Code Review
 
-Multi-phase code review system using external AI models (Claude, Codex, Gemini, and Pi) with parallel specialized agents. Inspired by the ralphex autonomous review pipeline.
+Multi-phase code review system using external AI models (Codex, Gemini, and Pi) with parallel specialized agents.
+
+The skill orchestrates all review phases directly — no subprocess escalation or `--dangerously-skip-permissions`. External tools run in read-only/sandbox mode; all fixes happen in the user's session with normal permissions.
 
 ## Prerequisites
 
-Required CLI tools:
-- `claude` - Claude CLI (Anthropic)
+Required CLI tools (at least one external tool recommended):
 - `codex` - Codex CLI (OpenAI) - optional
-- `gemini` - Gemini CLI (Google) - optional, used as fallback when codex is not available
-- `pi` - [Pi CLI](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) (multimodel) - optional, used as fallback when codex and gemini are not available
-
-At least one of `codex`, `gemini`, or `pi` is recommended for the external review phase. If none is available, the external review phase will be skipped.
+- `gemini` - Gemini CLI (Google) - optional, fallback when codex unavailable
+- `pi` - [Pi CLI](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) (multimodel) - optional, fallback when codex and gemini unavailable
 
 ## Model Configuration
 
-By default, **do NOT specify a model** for either Claude CLI or Codex CLI — let each use its own default.
+Optional config file at `~/.claude/external-code-review/config.json`:
 
-**Exception**: If a config file exists at `~/.claude/external-code-review/config.json` with model overrides, use those. Before running any external CLI, check:
-
-```bash
-# Check for custom model config
-if [ -f ~/.claude/external-code-review/config.json ]; then
-  cat ~/.claude/external-code-review/config.json
-fi
-```
-
-Supported config fields:
-
-| Field | Effect |
-|-------|--------|
-| `claude_model` | Pass `--model <value>` to `claude` CLI |
-| `codex_model` | Pass `-c 'model="<value>"'` to `codex exec` |
-| `gemini_model` | Pass `-m <value>` to `gemini` CLI |
-| `pi_model` | Pass `--model <value>` to `pi` CLI (supports `provider/model` format, e.g. `anthropic/claude-sonnet-4-20250514`) |
-| `pi_thinking` | Pass `--thinking <value>` to `pi` CLI (default: `high`). Values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `pi_options` | Additional CLI options as a list of strings, e.g. `["--provider", "openai"]`. Options starting with `--tools`, `--extensions`, `--skills`, `--no-extensions`, `--no-skills`, `--prompt`, `--model`, or `--thinking` are rejected, as are `-p` and bare `--` (safety flags and dedicated config fields are enforced automatically). |
-| `external_tool` | Which external tool to use: `auto` (default), `codex`, `gemini`, or `pi` |
-
-Example config:
 ```json
 {
-  "claude_model": "sonnet",
   "codex_model": "gpt-5.2-codex",
   "gemini_model": "",
   "pi_model": "",
@@ -54,12 +31,20 @@ Example config:
 }
 ```
 
+| Field | Effect |
+|-------|--------|
+| `codex_model` | Pass `-c 'model="<value>"'` to `codex exec` |
+| `gemini_model` | Pass `-m <value>` to `gemini` CLI |
+| `pi_model` | Pass `--model <value>` to `pi` CLI (supports `provider/model` format) |
+| `pi_thinking` | Pass `--thinking <value>` to `pi` CLI (default: `high`). Values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `pi_options` | Additional CLI options as a list of strings, e.g. `["--provider", "openai"]`. Safety-related flags are rejected. |
+| `external_tool` | Which external tool to use: `auto` (default), `codex`, `gemini`, or `pi` |
+
 **External tool resolution (`auto` mode)**:
 1. If user explicitly requests a specific tool (`gemini`, `pi`), use it
 2. Try Codex CLI first (default)
 3. If Codex is not installed, fall back to Gemini CLI
 4. If Gemini is not installed, fall back to Pi CLI
-5. If none is found, attempt Codex (will fail with clear error)
 
 If a field is absent or the config file doesn't exist, omit the model flag entirely for that CLI.
 
@@ -67,44 +52,37 @@ If a field is absent or the config file doesn't exist, omit the model flag entir
 
 ### Quick Review Mode
 
-If the user requests a **quick review** (e.g., "quick review", "fast review", "quick code review"), skip directly to the **Final Review** phase only:
+If the user requests a **quick review**, skip Phase 1 and Phase 2:
 
-1. Run steps from **"0. Check Branch Status & Commit Changes"** and **"1. Gather Context"** as normal
+1. Run **"0. Check Branch Status"** and **"1. Gather Context"** as normal
 2. Skip Phase 1 (First Review) entirely
-3. Skip Phase 2 (Codex External Review) entirely
+3. Skip Phase 2 (External Review) entirely
 4. Run **Phase 3 (Final Review)** only — 2 agents (quality + implementation), critical/major issues only
-5. Generate the review report (noting it was a quick review)
-
-Use the script shortcut:
-```bash
-python scripts/run_review.py quick --branch main
-```
 
 ### Full Review Mode (Default)
 
-When no quick mode is requested, run all 3 phases as described below.
+Run all 3 phases as described below.
 
 ## Review Phases
 
 ### Phase 1: First Review (5 Agents in Parallel)
 
-Launch 5 specialized agents simultaneously:
+Launch 5 specialized agents simultaneously using the Agent tool:
 
-| Agent | Focus Area |
-|-------|------------|
-| quality | Bugs, security, race conditions, error handling |
-| implementation | Goal achievement, requirement coverage, integration |
-| testing | Test coverage, quality, edge cases, fake tests |
-| simplification | Over-engineering, excessive abstraction, unused code |
-| documentation | README, CLAUDE.md, breaking changes |
+| Agent | Focus Area | Prompt File |
+|-------|------------|-------------|
+| quality | Bugs, security, race conditions, error handling | `agents/quality.txt` |
+| implementation | Goal achievement, requirement coverage, integration | `agents/implementation.txt` |
+| testing | Test coverage, quality, edge cases, fake tests | `agents/testing.txt` |
+| simplification | Over-engineering, excessive abstraction, unused code | `agents/simplification.txt` |
+| documentation | README, CLAUDE.md, breaking changes | `agents/documentation.txt` |
 
 ### Phase 2: External Review (Codex, Gemini, or Pi)
 
-- External model (Codex, Gemini, or Pi) analyzes code in sandbox/read-only mode
-- Independent perspective from different model family
-- Claude evaluates external findings
-- Categorize as: Valid / Invalid / Irrelevant
-- Tool selection: auto-detects available CLI, or user can specify `--external-tool gemini` or `--external-tool pi`
+- Run external tool via the script (read-only/sandbox mode)
+- Get independent perspective from a different model family
+- Evaluate findings directly and fix valid issues
+- Tool selection: auto-detects available CLI, or user can specify
 
 ### Phase 3: Final Review (2 Agents)
 
@@ -119,13 +97,8 @@ Launch 5 specialized agents simultaneously:
 Before running the review, verify you're on a feature branch with committed changes:
 
 ```bash
-# Check current branch
 git branch --show-current
-
-# Check for uncommitted changes
 git status
-
-# Check if there are commits compared to base branch
 git log main..HEAD --oneline
 ```
 
@@ -136,132 +109,99 @@ git log main..HEAD --oneline
 **If there are uncommitted changes:**
 1. Ask the user if they want to commit before review
 2. If yes, stage and commit: `git add -A && git commit -m "wip: changes for review"`
-3. This ensures clean separation between reviewed code and subsequent fixes
 
 **If no commits ahead of base branch:**
-- The review will have nothing to analyze
 - Inform the user and ask what they want to review
 
 ### 1. Gather Context
 
 ```bash
-# Get changes to review
 git log main..HEAD --oneline
 git diff main...HEAD
 ```
 
-Determine scope: full codebase, branch diff, or specific files.
+Save the diff output — you'll pass it to the review agents.
 
-### 2. Run First Review
+### 2. Run Phase 1: First Review (5 Agents)
 
-Execute the review script:
-
-```bash
-python scripts/run_review.py first --branch main
-```
-
-Or manually with claude CLI (add `--model <claude_model>` if configured):
-
-```bash
-# Check config for claude model
-CLAUDE_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('claude_model',''))" 2>/dev/null)
-
-claude -p "$(cat prompts/review_first.txt)" ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"}
-```
-
-**Agent launch pattern** (in parallel via Task tool):
+Read each agent prompt from `agents/*.txt`. Launch ALL 5 agents in parallel using the Agent tool. Each agent receives the git diff and its specialized prompt.
 
 ```
 For each agent in [quality, implementation, testing, simplification, documentation]:
-  Task(subagent_type="general-purpose", prompt=agent_prompt + git_diff)
+  Read agents/<agent>.txt
+  Agent(prompt = agent_prompt + "\n\nCode changes to review:\n" + git_diff)
 ```
 
 ### 3. Process First Review Findings
 
-For each finding:
-1. **Verify** - Read actual code to confirm
+After all agents complete, collect their findings. For each finding:
+
+1. **Verify** - Read the actual code at file:line using Read tool
 2. **Classify** - CONFIRMED or FALSE POSITIVE
-3. **Fix** - Apply changes for confirmed issues
-4. **Test** - Run tests + linter
+3. **Fix** - Apply changes for confirmed issues using Edit tool
+4. **Test** - Run tests + linter via Bash
 5. **Commit** - `git commit -m "fix: address code review findings"`
 
-Loop until zero confirmed issues found.
+**Loop**: Re-run Phase 1 agents to verify fixes didn't introduce new issues. Continue until zero confirmed issues found in an iteration.
 
-### 4. Run External Review (Codex, Gemini, or Pi)
+IMPORTANT: Pre-existing issues (linter errors, failed tests) should also be fixed.
 
-```bash
-# Auto-detect tool (codex first, gemini fallback, pi fallback)
-python scripts/run_review.py codex --branch main
+### 4. Run Phase 2: External Review
 
-# Explicitly use gemini
-python scripts/run_review.py codex --branch main --external-tool gemini
-
-# Explicitly use pi
-python scripts/run_review.py codex --branch main --external-tool pi
-
-# Pi with custom model and thinking level
-python scripts/run_review.py codex --branch main --external-tool pi --pi-model "anthropic/claude-sonnet-4-20250514" --pi-thinking xhigh
-```
-
-Or manually with Codex:
+Run the external review script via Bash:
 
 ```bash
-CODEX_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('codex_model',''))" 2>/dev/null)
-
-if [ -n "$CODEX_MODEL" ]; then
-  codex exec --sandbox read-only \
-    -c "model=\"$CODEX_MODEL\"" \
-    -c model_reasoning_effort=xhigh \
-    "Review code changes: $(git diff main...HEAD)"
-else
-  codex exec --sandbox read-only \
-    -c model_reasoning_effort=xhigh \
-    "Review code changes: $(git diff main...HEAD)"
-fi
+python scripts/run_review.py --branch main
 ```
 
-Or manually with Gemini:
-
+Options:
 ```bash
-GEMINI_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('gemini_model',''))" 2>/dev/null)
+# Force specific tool
+python scripts/run_review.py --branch main --external-tool gemini
+python scripts/run_review.py --branch main --external-tool pi
 
-gemini -p "Review code changes: $(git diff main...HEAD)" \
-  -s -o text ${GEMINI_MODEL:+-m "$GEMINI_MODEL"}
+# With previous context (dismissed findings)
+python scripts/run_review.py --branch main --previous-context "..."
 ```
 
-Or manually with Pi:
-
-```bash
-PI_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('pi_model',''))" 2>/dev/null)
-PI_THINKING=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('pi_thinking','high'))" 2>/dev/null)
-
-pi -p "Review code changes: $(git diff main...HEAD)" \
-  --thinking "${PI_THINKING:-high}" ${PI_MODEL:+--model "$PI_MODEL"} \
-  --tools read,grep,find,ls --no-extensions --no-skills
-```
+The script runs the external tool in read-only mode and prints findings to stdout.
 
 ### 5. Evaluate External Findings
 
-Pass external tool output to Claude for evaluation (add `--model <claude_model>` if configured):
+Read the script output. For EACH finding:
 
-```bash
-claude -p "$(cat prompts/external_eval.txt)" ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"}
-```
+1. Read the code at the reported location using the Read tool
+2. Trace the flow — find callers, understand full context
+3. Assess actual impact — real problem or style preference?
 
-Three-path evaluation logic:
-- **Valid issues found** → fix them, no signal, loop re-runs external tool to verify
-- **All findings dismissed** → no signal, loop re-runs with dismissal explanations as context
-- **External tool found nothing** → commit fixes, emit `<<<CODEX_REVIEW_DONE>>>`
+Categorize as:
+- **Valid issues** → Fix using Edit tool, run tests, DO NOT commit yet
+- **Invalid/irrelevant** → Note why (will be passed as previous context)
 
-### 6. Run Final Review
+### 6. Loop External Review
 
-```bash
-python scripts/run_review.py final --branch main
-```
+If valid issues were fixed:
+- Run the script again to verify fixes (external tool re-checks)
 
-Only 2 agents (quality + implementation), critical/major issues only.
+If all findings were dismissed:
+- Run script again with `--previous-context` containing dismissal explanations
+- This prevents the external tool from re-reporting the same findings
 
-### 7. Generate Review Report
+If the external tool finds nothing:
+- Commit all accumulated fixes: `git commit -m "fix: address external review findings"`
+- External review is complete
+
+Max iterations: 3. If max reached, commit any fixes and move on.
+
+### 7. Run Phase 3: Final Review (2 Agents)
+
+Same as Phase 1 but:
+- Only 2 agents: quality + implementation
+- Focus on **critical/major issues only**
+- Ignore style/minor issues
+- Max iterations: 3
+
+### 8. Generate Review Report
 
 After all phases complete, output structured report:
 
@@ -271,17 +211,14 @@ After all phases complete, output structured report:
 ## Summary
 - Files reviewed: N
 - Issues found: X (Y fixed, Z false positives)
-- Codex findings: A (B valid, C invalid)
+- External review findings: A (B valid, C invalid)
 
 ## Phase 1: First Review
 ### Quality Agent
 - [FIXED] Issue description
 - [FALSE POSITIVE] Finding explanation
 
-### Implementation Agent
-...
-
-## Phase 2: Codex External Review
+## Phase 2: External Review
 - [VALID] Finding + fix applied
 - [INVALID] Finding + rationale
 
@@ -290,20 +227,8 @@ After all phases complete, output structured report:
 
 ## Commits
 - abc123: fix: address code review findings
-- def456: fix: address codex review findings
+- def456: fix: address external review findings
 ```
-
-## Signal-Based Completion
-
-The review loop uses signals to determine completion:
-
-| Signal | Meaning |
-|--------|---------|
-| `<<<REVIEW_DONE>>>` | Zero issues found this iteration |
-| `<<<CODEX_REVIEW_DONE>>>` | Codex found no issues |
-| `<<<REVIEW_FAILED>>>` | Cannot fix (needs human intervention) |
-
-**Important**: `REVIEW_DONE` means "found zero issues", NOT "finished fixing". If issues were fixed, do NOT emit signal - let loop run again to verify.
 
 ## Agent Definitions
 
@@ -315,59 +240,29 @@ See `agents/` directory for full agent prompts:
 - `agents/simplification.txt` - Over-engineering detection
 - `agents/documentation.txt` - Documentation updates
 
-## Prompt Templates
+## Script Usage
 
-See `prompts/` directory:
+The script `scripts/run_review.py` is a thin wrapper that runs external tools only:
 
-- `prompts/review_first.txt` - Phase 1 comprehensive review
-- `prompts/external_eval.txt` - External tool findings evaluation (Codex/Gemini/Pi)
-- `prompts/review_final.txt` - Phase 3 critical review
-
-## Configuration Options
-
-When invoking review, consider:
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| branch | main | Base branch for diff |
-| max_iterations | 10 | Max review loops |
-| claude_model | (claude default) | Claude model — uses Claude default unless overridden in `~/.claude/external-code-review/config.json` |
-| codex_enabled | true | Run external review phase |
-| codex_model | (codex default) | Codex model — uses Codex default unless overridden in `~/.claude/external-code-review/config.json` |
-| codex_sandbox | read-only | Codex sandbox mode |
-| codex_reasoning | xhigh | Codex reasoning effort level |
-| external_tool | auto | External tool selection: `auto` (codex→gemini→pi fallback), `codex`, `gemini`, or `pi` |
-| gemini_model | (gemini default) | Gemini model — uses Gemini default unless overridden in config |
-| pi_model | (pi default) | Pi model — supports `provider/model` format (e.g. `anthropic/claude-sonnet-4-20250514`) |
-| pi_thinking | high | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| pi_options | (none) | Additional Pi CLI options as list of strings |
-
-## Example Session
-
-**User**: "Review my feature branch against main"
-
-**Execution**:
 ```bash
-# Phase 1: First review with 5 agents
-python scripts/run_review.py first --branch main
+python scripts/run_review.py [options]
 
-# Phase 2: Codex external review
-python scripts/run_review.py codex --branch main
-
-# Phase 3: Final review
-python scripts/run_review.py final --branch main
-
-# Generate report
-python scripts/run_review.py report
+Options:
+  --branch, -b        Base branch for diff (default: main)
+  --external-tool     External tool: auto (default), codex, gemini, or pi
+  --codex-model       Codex model override
+  --gemini-model      Gemini model override
+  --pi-model          Pi model override (supports provider/model format)
+  --pi-thinking       Pi thinking level: off, minimal, low, medium, high, xhigh
+  --pi-options        Additional Pi CLI options
+  --previous-context  Dismissed findings from prior iterations
 ```
 
 ## Notes
 
+- All orchestration happens in the user's Claude Code session — no permission escalation
+- External tools run in read-only/sandbox mode (Codex: `--sandbox read-only`, Gemini: `-s`, Pi: `--tools read,grep,find,ls`)
 - Always verify findings by reading actual code before fixing
 - Run tests + linter after each fix batch
 - Commit fixes with descriptive messages
-- Codex runs in read-only sandbox for safety
-- Pi runs with restricted tools (read, grep, find, ls) and extensions/skills disabled
-- Gemini runs in sandbox mode (-s flag)
-- Final review ignores style/minor issues (critical/major only)
 - Pre-existing issues should still be fixed if found
