@@ -1,6 +1,6 @@
 # External Code Review
 
-Multi-phase code review system using external AI models (Claude, Codex, and Gemini) with parallel specialized agents. Inspired by the [ralphex](https://github.com/umputun/ralphex) autonomous review pipeline.
+Multi-phase code review system using external AI models (Claude, Codex, Gemini, and Pi) with parallel specialized agents. Inspired by the [ralphex](https://github.com/umputun/ralphex) autonomous review pipeline.
 
 ## Structure
 
@@ -16,7 +16,7 @@ external-code-review/
 │   └── documentation.txt         # Documentation updates review
 ├── prompts/
 │   ├── review_first.txt          # Phase 1: Comprehensive (5 agents)
-│   ├── external_eval.txt          # Phase 2: External tool evaluation (Codex/Gemini)
+│   ├── external_eval.txt          # Phase 2: External tool evaluation (Codex/Gemini/Pi)
 │   └── review_final.txt          # Phase 3: Critical issues (2 agents)
 └── scripts/
     └── run_review.py             # Review orchestration script
@@ -29,6 +29,7 @@ Install and configure these CLI tools:
 - **claude** - [Claude CLI](https://docs.anthropic.com/claude-code) (Anthropic) - required
 - **codex** - [Codex CLI](https://github.com/openai/codex) (OpenAI) - optional
 - **gemini** - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (Google) - optional, fallback when codex unavailable
+- **pi** - [Pi CLI](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) (multimodel) - optional, fallback when codex and gemini unavailable
 
 ## Configuration
 
@@ -39,6 +40,8 @@ Optional config file at `~/.claude/external-code-review/config.json`:
   "claude_model": "sonnet",
   "codex_model": "gpt-5.2-codex",
   "gemini_model": "",
+  "pi_model": "",
+  "pi_thinking": "high",
   "external_tool": "auto"
 }
 ```
@@ -50,14 +53,18 @@ All fields are optional — omit to use defaults.
 | `claude_model` | CLI default | Model for `claude` CLI (`--model` flag) |
 | `codex_model` | CLI default | Model for `codex` CLI |
 | `gemini_model` | CLI default | Model for `gemini` CLI (`-m` flag) |
-| `external_tool` | `auto` | Which external tool to use: `auto`, `codex`, or `gemini` |
+| `pi_model` | CLI default | Model for `pi` CLI (`--model` flag, supports `provider/model` format) |
+| `pi_thinking` | `high` | Thinking level for `pi` CLI: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `pi_options` | (none) | Additional `pi` CLI options as list of strings, e.g. `["--provider", "openai"]`. Options starting with `--tools`, `--extensions`, `--skills`, `--no-extensions`, or `--no-skills` are rejected (safety flags are enforced automatically). |
+| `external_tool` | `auto` | Which external tool to use: `auto`, `codex`, `gemini`, or `pi` |
 
 **External tool resolution (`auto` mode):**
 1. Try Codex CLI first
 2. If Codex is not installed, fall back to Gemini CLI
-3. If user explicitly asks for gemini (e.g., "review with gemini"), use Gemini regardless
+3. If Gemini is not installed, fall back to Pi CLI
+4. If user explicitly asks for a tool (e.g., "review with pi"), use it regardless
 
-Set `external_tool` to `codex` or `gemini` to skip auto-detection and always use a specific tool.
+Set `external_tool` to `codex`, `gemini`, or `pi` to skip auto-detection and always use a specific tool.
 
 ## Quick Start
 
@@ -99,10 +106,10 @@ Launches 5 specialized agents **in parallel**:
 | **simplification** | Over-engineering, excessive abstraction, premature optimization |
 | **documentation** | README updates, CLAUDE.md, breaking changes |
 
-### Phase 2: External Review (Codex or Gemini)
+### Phase 2: External Review (Codex, Gemini, or Pi)
 
-- External tool (Codex or Gemini) analyzes code in sandbox mode
-- Auto-detects available tool: codex first, gemini fallback. Use `--external-tool gemini` to force Gemini.
+- External tool (Codex, Gemini, or Pi) analyzes code in sandbox/read-only mode
+- Auto-detects available tool: codex first, gemini fallback, pi fallback. Use `--external-tool pi` to force Pi.
 - Provides independent perspective from a different model family
 - Claude evaluates findings with three-path logic:
   - **Valid issues found** → fix them, loop re-runs external tool to verify
@@ -151,10 +158,12 @@ Options:
   --branch, -b        Base branch for diff (default: main)
   --goal, -g          Description of what was implemented
   --max-iterations, -i  Max review iterations (default: 10)
-  --no-codex          Disable external review (Codex/Gemini)
+  --no-codex          Disable external review (Codex/Gemini/Pi)
   --codex-model       Codex model override (default: codex default)
-  --external-tool     External tool: auto (default), codex, or gemini
+  --external-tool     External tool: auto (default), codex, gemini, or pi
   --gemini-model      Gemini model override (default: gemini default)
+  --pi-model          Pi model override (default: pi default, supports provider/model format)
+  --pi-thinking       Pi thinking level: off, minimal, low, medium, high (default), xhigh
   --timeout, -t       Timeout per Claude call in seconds (default: 120)
 ```
 

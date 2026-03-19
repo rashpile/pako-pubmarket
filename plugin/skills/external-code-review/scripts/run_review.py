@@ -2,7 +2,7 @@
 """
 External Code Review Runner
 
-Orchestrates multi-phase code review using Claude and Codex CLIs.
+Orchestrates multi-phase code review using Claude, Codex, Gemini, and Pi CLIs.
 
 Usage:
     python run_review.py first --branch main [--max-iterations 10]
@@ -16,6 +16,7 @@ Usage:
 import subprocess
 import sys
 import argparse
+import json
 import os
 from pathlib import Path
 from dataclasses import dataclass
@@ -23,17 +24,10 @@ from enum import Enum
 from typing import Optional
 
 
-class Phase(Enum):
-    FIRST = "first"
-    CODEX = "codex"
-    FINAL = "final"
-    FULL = "full"
-    QUICK = "quick"
-
-
 class ExternalTool(Enum):
     CODEX = "codex"
     GEMINI = "gemini"
+    PI = "pi"
 
 
 class Signal(Enum):
@@ -42,33 +36,31 @@ class Signal(Enum):
     REVIEW_FAILED = "<<<REVIEW_FAILED>>>"
 
 
-def _detect_external_tool(preferred: str = "codex") -> ExternalTool:
+def _detect_external_tool(preferred: str = "auto") -> ExternalTool:
     """Detect which external review tool to use.
 
-    Priority:
-    1. If user explicitly requested 'gemini', use gemini
-    2. Try codex first (default)
-    3. Fall back to gemini if codex not found
-    4. If neither found, return codex (will fail with clear error)
+    If preferred is a specific tool name (codex/gemini/pi), return it
+    directly without checking availability (will fail with clear error
+    if the tool is not installed).
+
+    If preferred is 'auto', probe for installed tools in order:
+    codex -> gemini -> pi. If none found, return codex (will fail with
+    clear error when run).
     """
-    if preferred == "gemini":
-        return ExternalTool.GEMINI
+    _tool_map = {"codex": ExternalTool.CODEX, "gemini": ExternalTool.GEMINI, "pi": ExternalTool.PI}
+    if preferred in _tool_map:
+        return _tool_map[preferred]
 
-    # Check if codex is available
-    try:
-        subprocess.run(["codex", "--version"], capture_output=True, timeout=10)
-        return ExternalTool.CODEX
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    # Auto-detect: probe in priority order (codex -> gemini -> pi)
+    for name, tool in _tool_map.items():
+        try:
+            result = subprocess.run([name, "--version"], capture_output=True, timeout=10)
+            if result.returncode == 0:
+                return tool
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
-    # Fallback: check if gemini is available
-    try:
-        subprocess.run(["gemini", "--version"], capture_output=True, timeout=10)
-        return ExternalTool.GEMINI
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Neither found, return codex (will produce a clear error when run)
+    # None found, return codex (will produce a clear error when run)
     return ExternalTool.CODEX
 
 
@@ -82,8 +74,11 @@ class ReviewConfig:
     codex_sandbox: str = "read-only"
     codex_reasoning: str = "xhigh"
     timeout: int = 120
-    external_tool: str = "auto"  # "auto", "codex", or "gemini"
+    external_tool: str = "auto"  # "auto", "codex", "gemini", or "pi"
     gemini_model: str = ""  # empty = use gemini default
+    pi_model: str = ""  # empty = use pi default
+    pi_thinking: str = "high"  # thinking level: off, minimal, low, medium, high, xhigh
+    pi_options: Optional[list[str]] = None  # additional CLI options as list of strings
 
 
 class ReviewRunner:
@@ -94,6 +89,7 @@ class ReviewRunner:
         self.script_dir = Path(__file__).parent
         self.prompts_dir = self.script_dir.parent / "prompts"
         self.agents_dir = self.script_dir.parent / "agents"
+        self.external_tool_resolved = _detect_external_tool(config.external_tool)
 
     def _log(self, message: str, prefix: str = "🔍"):
         """Log a message."""
@@ -126,16 +122,22 @@ class ReviewRunner:
 
     def _get_git_diff(self) -> str:
         """Get git diff against base branch."""
-        output, _ = self._run_command([
+        output, success = self._run_command([
             "git", "diff", f"{self.config.branch}...HEAD"
         ])
+        if not success:
+            self._log(f"git diff failed: {output}", "⚠️")
+            return ""
         return output
 
     def _get_git_log(self) -> str:
         """Get git log since base branch."""
-        output, _ = self._run_command([
+        output, success = self._run_command([
             "git", "log", f"{self.config.branch}..HEAD", "--oneline"
         ])
+        if not success:
+            self._log(f"git log failed: {output}", "⚠️")
+            return ""
         return output
 
     def _load_prompt(self, name: str) -> str:
@@ -180,10 +182,6 @@ class ReviewRunner:
 
         return output, success, signal
 
-    def _resolve_external_tool(self) -> ExternalTool:
-        """Resolve which external tool to use for this review."""
-        return _detect_external_tool(self.config.external_tool)
-
     def run_codex(self, diff: str, previous_context: str = "") -> tuple[str, bool]:
         """Run Codex CLI for external review."""
         self._log("Running Codex external review...", "🤖")
@@ -223,11 +221,41 @@ class ReviewRunner:
         output, success = self._run_command(cmd, timeout=600)  # 10 min for gemini
         return output, success
 
+    def run_pi(self, diff: str, previous_context: str = "") -> tuple[str, bool]:
+        """Run Pi CLI for external review."""
+        self._log("Running Pi external review...", "🥧")
+
+        prompt = self._build_external_review_prompt(diff, previous_context)
+
+        cmd = [
+            "pi",
+            "-p", prompt,
+        ]
+
+        # Add thinking level (always set; validated to a known value before reaching here)
+        cmd.extend(["--thinking", self.config.pi_thinking])
+
+        # Add model override if configured
+        if self.config.pi_model:
+            cmd.extend(["--model", self.config.pi_model])
+
+        # Safety flags: always present, placed before user options so deny-list is the primary control
+        cmd.extend(["--tools", "read,grep,find,ls", "--no-extensions", "--no-skills"])
+
+        # Additional custom options (validated by deny-list at config load time)
+        if self.config.pi_options:
+            cmd.extend(self.config.pi_options)
+
+        output, success = self._run_command(cmd, timeout=600)  # 10 min for pi
+        return output, success
+
     def run_external_review(self, diff: str, previous_context: str = "") -> tuple[str, bool]:
-        """Run external review using the resolved tool (codex or gemini)."""
-        tool = self._resolve_external_tool()
+        """Run external review using the resolved tool (codex, gemini, or pi)."""
+        tool = self.external_tool_resolved
         if tool == ExternalTool.GEMINI:
             return self.run_gemini(diff, previous_context)
+        if tool == ExternalTool.PI:
+            return self.run_pi(diff, previous_context)
         return self.run_codex(diff, previous_context)
 
     def _build_external_review_prompt(self, diff: str, previous_context: str = "") -> str:
@@ -292,12 +320,12 @@ Report problems only - no positive observations.{ctx_section}"""
         return True
 
     def run_codex_review(self) -> bool:
-        """Run external review phase (Codex or Gemini)."""
+        """Run external review phase (Codex, Gemini, or Pi)."""
         if not self.config.codex_enabled:
             self._log("External review disabled, skipping", "⏭️")
             return True
 
-        tool = self._resolve_external_tool()
+        tool = self.external_tool_resolved
         tool_name = tool.value.capitalize()
         self._log(f"Starting EXTERNAL REVIEW phase ({tool_name})", "🤖")
 
@@ -318,8 +346,8 @@ Report problems only - no positive observations.{ctx_section}"""
             ext_output, ext_success = self.run_external_review(diff, previous_context)
 
             if not ext_success:
-                self._log(f"{tool_name} execution failed, continuing anyway", "⚠️")
-                return True
+                self._log(f"{tool_name} execution failed, retrying next iteration", "⚠️")
+                continue
 
             print(f"\n{'='*60}")
             print(f"{tool_name.upper()} OUTPUT:")
@@ -335,8 +363,8 @@ Report problems only - no positive observations.{ctx_section}"""
             # Have Claude evaluate external findings
             eval_template = self._load_prompt("external_eval")
             if not eval_template:
-                # Fallback to legacy prompt name
-                eval_template = self._load_prompt("codex_eval")
+                self._log("Could not load external_eval.txt prompt", "❌")
+                return False
             eval_prompt = eval_template.replace("{{EXTERNAL_OUTPUT}}", ext_output)
             eval_prompt = eval_prompt.replace("{{PREVIOUS_REVIEW_CONTEXT}}", previous_context)
             eval_prompt = self._build_prompt(eval_prompt)
@@ -465,28 +493,79 @@ def main():
     parser.add_argument("--max-iterations", "-i", type=int, default=10,
                         help="Max review iterations (default: 10)")
     parser.add_argument("--no-codex", action="store_true",
-                        help="Disable external review (Codex/Gemini)")
-    parser.add_argument("--codex-model", default="gpt-5.2-codex",
+                        help="Disable external review (Codex/Gemini/Pi)")
+    parser.add_argument("--codex-model", default=None,
                         help="Codex model to use")
-    parser.add_argument("--external-tool", default="auto",
-                        choices=["auto", "codex", "gemini"],
-                        help="External review tool: auto (codex with gemini fallback), codex, or gemini")
-    parser.add_argument("--gemini-model", default="",
+    parser.add_argument("--external-tool", default=None,
+                        choices=["auto", "codex", "gemini", "pi"],
+                        help="External review tool: auto (codex→gemini→pi fallback), codex, gemini, or pi")
+    parser.add_argument("--gemini-model", default=None,
                         help="Gemini model to use (default: gemini default)")
+    parser.add_argument("--pi-model", default=None,
+                        help="Pi model to use, e.g. 'google/gemini-2.5-pro' or 'anthropic/claude-sonnet-4-20250514' (default: pi default)")
+    parser.add_argument("--pi-thinking", default=None,
+                        choices=["off", "minimal", "low", "medium", "high", "xhigh"],
+                        help="Pi thinking level: off, minimal, low, medium, high, xhigh (default: high)")
     parser.add_argument("--timeout", "-t", type=int, default=120,
                         help="Timeout per Claude call in seconds")
 
     args = parser.parse_args()
+
+    # Load config.json for defaults
+    config_path = Path.home() / ".claude" / "external-code-review" / "config.json"
+    file_config = {}
+    if config_path.exists():
+        try:
+            file_config = json.loads(config_path.read_text())
+        except Exception as e:
+            print(f"Warning: could not load config from {config_path}: {e}", file=sys.stderr)
+
+    # Validate pi_options from config file
+    raw_pi_options = file_config.get("pi_options", None)
+    if raw_pi_options is not None:
+        if not isinstance(raw_pi_options, list) or not all(isinstance(o, str) for o in raw_pi_options):
+            print("Warning: pi_options in config.json must be a list of strings, ignoring", file=sys.stderr)
+            raw_pi_options = None
+        else:
+            _denied_prefixes = (
+                "--tools", "--no-extensions", "--no-skills", "--extensions", "--skills",
+                "--prompt", "--model", "--thinking",
+            )
+            _denied_exact = {"--", "-p"}
+            has_denied = any(
+                o.strip() in _denied_exact or any(o.strip().startswith(p) for p in _denied_prefixes)
+                for o in raw_pi_options
+            )
+            if has_denied:
+                print("Warning: pi_options contains restricted flags, ignoring", file=sys.stderr)
+                raw_pi_options = None
+
+    # Validate pi_thinking from config file
+    _valid_thinking = {"off", "minimal", "low", "medium", "high", "xhigh"}
+    pi_thinking_val = args.pi_thinking if args.pi_thinking is not None else file_config.get("pi_thinking", "high")
+    if pi_thinking_val not in _valid_thinking:
+        print(f"Warning: invalid pi_thinking '{pi_thinking_val}' in config, using 'high'", file=sys.stderr)
+        pi_thinking_val = "high"
+
+    # Validate external_tool from config file
+    _valid_tools = {"auto", "codex", "gemini", "pi"}
+    ext_tool_val = args.external_tool if args.external_tool is not None else file_config.get("external_tool", "auto")
+    if ext_tool_val not in _valid_tools:
+        print(f"Warning: invalid external_tool '{ext_tool_val}' in config, using 'auto'", file=sys.stderr)
+        ext_tool_val = "auto"
 
     config = ReviewConfig(
         branch=args.branch,
         goal=args.goal,
         max_iterations=args.max_iterations,
         codex_enabled=not args.no_codex,
-        codex_model=args.codex_model,
+        codex_model=args.codex_model if args.codex_model is not None else file_config.get("codex_model", "gpt-5.2-codex"),
         timeout=args.timeout,
-        external_tool=args.external_tool,
-        gemini_model=args.gemini_model,
+        external_tool=ext_tool_val,
+        gemini_model=args.gemini_model if args.gemini_model is not None else file_config.get("gemini_model", ""),
+        pi_model=args.pi_model if args.pi_model is not None else file_config.get("pi_model", ""),
+        pi_thinking=pi_thinking_val,
+        pi_options=raw_pi_options,
     )
 
     runner = ReviewRunner(config)

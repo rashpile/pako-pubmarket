@@ -1,11 +1,11 @@
 ---
 name: external-code-review
-description: Multi-phase code review using external AI models (Claude CLI, Codex CLI, and Gemini CLI) with parallel review agents. Use when user wants external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "external code review", "multi-agent review", "review with external models", "review with gemini", or "comprehensive code analysis".
+description: Multi-phase code review using external AI models (Claude CLI, Codex CLI, Gemini CLI, and Pi CLI) with parallel review agents. Use when user wants external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "external code review", "multi-agent review", "review with external models", "review with gemini", "review with pi", or "comprehensive code analysis".
 ---
 
 # External Code Review
 
-Multi-phase code review system using external AI models (Claude, Codex, and Gemini) with parallel specialized agents. Inspired by the ralphex autonomous review pipeline.
+Multi-phase code review system using external AI models (Claude, Codex, Gemini, and Pi) with parallel specialized agents. Inspired by the ralphex autonomous review pipeline.
 
 ## Prerequisites
 
@@ -13,8 +13,9 @@ Required CLI tools:
 - `claude` - Claude CLI (Anthropic)
 - `codex` - Codex CLI (OpenAI) - optional
 - `gemini` - Gemini CLI (Google) - optional, used as fallback when codex is not available
+- `pi` - [Pi CLI](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) (multimodel) - optional, used as fallback when codex and gemini are not available
 
-At least one of `codex` or `gemini` is recommended for the external review phase. If neither is available, the external review phase will be skipped.
+At least one of `codex`, `gemini`, or `pi` is recommended for the external review phase. If none is available, the external review phase will be skipped.
 
 ## Model Configuration
 
@@ -36,7 +37,10 @@ Supported config fields:
 | `claude_model` | Pass `--model <value>` to `claude` CLI |
 | `codex_model` | Pass `-c 'model="<value>"'` to `codex exec` |
 | `gemini_model` | Pass `-m <value>` to `gemini` CLI |
-| `external_tool` | Which external tool to use: `auto` (default), `codex`, or `gemini` |
+| `pi_model` | Pass `--model <value>` to `pi` CLI (supports `provider/model` format, e.g. `anthropic/claude-sonnet-4-20250514`) |
+| `pi_thinking` | Pass `--thinking <value>` to `pi` CLI (default: `high`). Values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `pi_options` | Additional CLI options as a list of strings, e.g. `["--provider", "openai"]`. Options starting with `--tools`, `--extensions`, `--skills`, `--no-extensions`, or `--no-skills` are rejected (safety flags are enforced automatically). |
+| `external_tool` | Which external tool to use: `auto` (default), `codex`, `gemini`, or `pi` |
 
 Example config:
 ```json
@@ -44,15 +48,18 @@ Example config:
   "claude_model": "sonnet",
   "codex_model": "gpt-5.2-codex",
   "gemini_model": "",
+  "pi_model": "",
+  "pi_thinking": "high",
   "external_tool": "auto"
 }
 ```
 
 **External tool resolution (`auto` mode)**:
-1. If user explicitly requests `gemini`, use Gemini CLI
+1. If user explicitly requests a specific tool (`gemini`, `pi`), use it
 2. Try Codex CLI first (default)
 3. If Codex is not installed, fall back to Gemini CLI
-4. If neither is found, attempt Codex (will fail with clear error)
+4. If Gemini is not installed, fall back to Pi CLI
+5. If none is found, attempt Codex (will fail with clear error)
 
 If a field is absent or the config file doesn't exist, omit the model flag entirely for that CLI.
 
@@ -91,13 +98,13 @@ Launch 5 specialized agents simultaneously:
 | simplification | Over-engineering, excessive abstraction, unused code |
 | documentation | README, CLAUDE.md, breaking changes |
 
-### Phase 2: External Review (Codex or Gemini)
+### Phase 2: External Review (Codex, Gemini, or Pi)
 
-- External model (Codex or Gemini) analyzes code in sandbox mode
+- External model (Codex, Gemini, or Pi) analyzes code in sandbox/read-only mode
 - Independent perspective from different model family
 - Claude evaluates external findings
 - Categorize as: Valid / Invalid / Irrelevant
-- Tool selection: auto-detects available CLI, or user can specify `--external-tool gemini`
+- Tool selection: auto-detects available CLI, or user can specify `--external-tool gemini` or `--external-tool pi`
 
 ### Phase 3: Final Review (2 Agents)
 
@@ -180,14 +187,20 @@ For each finding:
 
 Loop until zero confirmed issues found.
 
-### 4. Run External Review (Codex or Gemini)
+### 4. Run External Review (Codex, Gemini, or Pi)
 
 ```bash
-# Auto-detect tool (codex first, gemini fallback)
+# Auto-detect tool (codex first, gemini fallback, pi fallback)
 python scripts/run_review.py codex --branch main
 
 # Explicitly use gemini
 python scripts/run_review.py codex --branch main --external-tool gemini
+
+# Explicitly use pi
+python scripts/run_review.py codex --branch main --external-tool pi
+
+# Pi with custom model and thinking level
+python scripts/run_review.py codex --branch main --external-tool pi --pi-model "anthropic/claude-sonnet-4-20250514" --pi-thinking xhigh
 ```
 
 Or manually with Codex:
@@ -214,6 +227,17 @@ GEMINI_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | pyth
 
 gemini -p "Review code changes: $(git diff main...HEAD)" \
   -s -o text ${GEMINI_MODEL:+-m "$GEMINI_MODEL"}
+```
+
+Or manually with Pi:
+
+```bash
+PI_MODEL=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('pi_model',''))" 2>/dev/null)
+PI_THINKING=$(cat ~/.claude/external-code-review/config.json 2>/dev/null | python3 -c "import sys,json; c=json.load(sys.stdin); print(c.get('pi_thinking','high'))" 2>/dev/null)
+
+pi -p "Review code changes: $(git diff main...HEAD)" \
+  --tools read,grep,find,ls --no-extensions --no-skills \
+  --thinking "${PI_THINKING:-high}" ${PI_MODEL:+--model "$PI_MODEL"}
 ```
 
 ### 5. Evaluate External Findings
@@ -296,7 +320,7 @@ See `agents/` directory for full agent prompts:
 See `prompts/` directory:
 
 - `prompts/review_first.txt` - Phase 1 comprehensive review
-- `prompts/external_eval.txt` - External tool findings evaluation (Codex/Gemini)
+- `prompts/external_eval.txt` - External tool findings evaluation (Codex/Gemini/Pi)
 - `prompts/review_final.txt` - Phase 3 critical review
 
 ## Configuration Options
@@ -312,8 +336,11 @@ When invoking review, consider:
 | codex_model | (codex default) | Codex model — uses Codex default unless overridden in `~/.claude/external-code-review/config.json` |
 | codex_sandbox | read-only | Codex sandbox mode |
 | codex_reasoning | xhigh | Codex reasoning effort level |
-| external_tool | auto | External tool selection: `auto` (codex→gemini fallback), `codex`, or `gemini` |
+| external_tool | auto | External tool selection: `auto` (codex→gemini→pi fallback), `codex`, `gemini`, or `pi` |
 | gemini_model | (gemini default) | Gemini model — uses Gemini default unless overridden in config |
+| pi_model | (pi default) | Pi model — supports `provider/model` format (e.g. `anthropic/claude-sonnet-4-20250514`) |
+| pi_thinking | high | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| pi_options | (none) | Additional Pi CLI options as list of strings |
 
 ## Example Session
 
