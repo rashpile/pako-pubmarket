@@ -1,0 +1,77 @@
+# First Review Prompt (Comprehensive)
+# Launches 5 parallel agents for thorough code review
+#
+# Variables to replace:
+#   {{GOAL}} - description of what was implemented
+#   {{DEFAULT_BRANCH}} - base branch (main, master, etc.)
+#   {{AGENT:quality}} - quality agent prompt
+#   {{AGENT:implementation}} - implementation agent prompt
+#   {{AGENT:testing}} - testing agent prompt
+#   {{AGENT:simplification}} - simplification agent prompt
+#   {{AGENT:documentation}} - documentation agent prompt
+
+Code review of: {{GOAL}}
+
+## Step 1: Get Branch Context
+
+Run both commands to understand what was done:
+- `git log {{DEFAULT_BRANCH}}..HEAD --oneline` - see commit history
+- `git diff {{DEFAULT_BRANCH}}...HEAD` - see actual code changes
+
+## Step 2: Launch ALL 5 Review Agents IN PARALLEL
+
+Use the Task tool to launch all 5 agents in parallel (multiple Task calls in one response).
+
+Agents to launch:
+{{AGENT:quality}}
+{{AGENT:implementation}}
+{{AGENT:testing}}
+{{AGENT:simplification}}
+{{AGENT:documentation}}
+
+Each agent prompt should include the diff and instruct: "Report problems only - no positive observations."
+
+## Step 3: Collect, Verify, and Fix Findings
+
+After agents complete:
+
+### 3.1 Collect and Deduplicate
+- Merge findings from all agents
+- Same file:line + same issue → merge
+- Cross-agent duplicates → merge, note both sources
+
+### 3.2 Verify EVERY Finding (CRITICAL)
+For EACH issue (bugs, test gaps, smells, over-engineering, error handling, docs, etc.):
+1. Read actual code at file:line
+2. Check full context (20-30 lines around)
+3. Verify issue is real, not a false positive
+4. Check for existing mitigations
+
+Classify as:
+- CONFIRMED: Real issue, fix it
+- FALSE POSITIVE: Doesn't exist or already mitigated - discard
+
+IMPORTANT: Pre-existing issues (linter errors, failed tests) should also be fixed.
+
+### 3.3 Fix All Confirmed Issues
+1. Fix all CONFIRMED issues (all types: bugs, tests, smells, docs, etc.)
+2. Run tests and linter to verify fixes
+3. Commit fixes: `git commit -m "fix: address code review findings"`
+
+## Step 4: Signal Completion
+
+SIGNAL LOGIC:
+
+<<<REVIEW_DONE>>> means "this iteration found ZERO issues" - NOT "I finished fixing issues".
+
+Path A - NO confirmed issues found:
+- You reviewed the code and found nothing to fix
+- Output: <<<REVIEW_DONE>>>
+
+Path B - Issues found AND fixed:
+- You found issues, fixed them, and committed
+- STOP HERE. Do NOT output any signal.
+- Another iteration will verify your fixes.
+
+Path C - Issues found but cannot fix:
+- Output: <<<REVIEW_FAILED>>>

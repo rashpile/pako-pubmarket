@@ -1,0 +1,13 @@
+{
+  "name": "pako-public-marketplace",
+  "owner": {
+    "name": "PaKo"
+  },
+  "plugins": [
+    {
+      "name": "pako-public-plugin",
+      "source": "./plugin",
+      "description": "Public collection of Claude Code skills"
+    }
+  ]
+}

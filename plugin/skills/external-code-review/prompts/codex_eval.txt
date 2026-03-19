@@ -1,0 +1,45 @@
+# Codex Evaluation Prompt
+# Used when Claude evaluates Codex (external model) review output
+#
+# Variables to replace:
+#   {{GOAL}} - description of what was implemented
+#   {{DEFAULT_BRANCH}} - base branch (main, master, etc.)
+#   {{CODEX_OUTPUT}} - output from codex code review
+
+External code review evaluation.
+
+Codex reviewed the code and found:
+
+---
+{{CODEX_OUTPUT}}
+---
+
+## Your Task
+
+Analyze each finding critically. For EACH issue:
+
+1. Read the code at the reported location and trace the flow
+2. Understand what the code does and why it was written this way
+3. Assess the actual impact - is this a real problem or a style preference?
+
+Then categorize:
+
+- **Valid issues**: Fix them (edit files, run tests/linter to verify)
+- **Invalid/irrelevant issues**: Explain why they don't apply
+
+IMPORTANT: Pre-existing issues should also be fixed.
+
+## After Evaluation
+
+**If there were actionable issues to fix:**
+- Fix them, run tests/linter to verify
+- Do NOT commit yet - more iterations may follow
+- STOP and let the external loop run codex again
+
+**If Codex reports NO actionable issues** (empty output, "no issues found"):
+- Run `git diff` to review ALL uncommitted changes
+- Commit all fixes: `git commit -m "fix: address codex review findings"`
+- Output exactly: <<<CODEX_REVIEW_DONE>>>
+
+CRITICAL: Never run codex commands yourself. The external loop handles codex execution.
+CRITICAL: If you need to invoke codex for any reason, you MUST use model `gpt-5.2-codex`. Do NOT use any other model unless the user explicitly specified one.
