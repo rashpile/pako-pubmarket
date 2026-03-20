@@ -50,16 +50,18 @@ If a field is absent or the config file doesn't exist, omit the model flag entir
 
 ## Review Modes
 
+**IMPORTANT: Always default to Full Review Mode unless the user explicitly says "quick review", "quick", or "fast review".** Phrases like "review my code", "run a review", "external code review", or just invoking this skill without qualifiers all mean Full Review. When in doubt, run the full review.
+
 ### Quick Review Mode
 
-If the user requests a **quick review**, skip Phase 1 and Phase 2:
+**Only** if the user explicitly requests a "quick review" or "fast review", skip Phase 1 and Phase 2:
 
 1. Run **"0. Check Branch Status"** and **"1. Gather Context"** as normal
 2. Skip Phase 1 (First Review) entirely
 3. Skip Phase 2 (External Review) entirely
 4. Run **Phase 3 (Final Review)** only — 2 agents (quality + implementation), critical/major issues only
 
-### Full Review Mode (Default)
+### Full Review Mode (Default — use this unless user explicitly asks for quick)
 
 Run all 3 phases as described below.
 
