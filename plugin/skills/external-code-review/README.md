@@ -37,7 +37,19 @@ Install at least one external review tool:
 
 ## Configuration
 
-Optional config file at `~/.claude/external-code-review/config.json`:
+Configuration is resolved with **project > user > built-in** precedence (first found wins, no merging):
+
+| Priority | Location | Scope |
+|----------|----------|-------|
+| 1 (highest) | `./.claude/external-code-review/` | Project-local (commit to repo) |
+| 2 | `~/.claude/external-code-review/` | User-global |
+| 3 (lowest) | Built-in (skill directory) | Default |
+
+This applies to both `config.json` and `agents/*.txt`.
+
+### config.json
+
+Optional config file at `./.claude/external-code-review/config.json` (project) or `~/.claude/external-code-review/config.json` (user):
 
 ```json
 {
@@ -67,6 +79,24 @@ All fields are optional — omit to use defaults.
 
 Set `external_tool` to `codex`, `gemini`, or `pi` to skip auto-detection.
 
+### Custom Review Agents
+
+Place `.txt` files in `agents/` at either config level to replace the built-in review agents:
+
+```
+# Project-local (applies to all contributors)
+.claude/external-code-review/agents/security.txt
+.claude/external-code-review/agents/performance.txt
+
+# User-global (personal preference)
+~/.claude/external-code-review/agents/quality.txt
+~/.claude/external-code-review/agents/testing.txt
+```
+
+Each file defines one agent — the filename (without `.txt`) becomes the agent name, and the file content is the review prompt passed to the agent.
+
+If at least one `.txt` file exists at a higher-priority level, **all** lower-level agents are ignored. To customize just one agent, copy all built-in agents from `agents/` to your override directory and modify the ones you want.
+
 ## Quick Start
 
 ```bash
@@ -82,9 +112,11 @@ python scripts/run_review.py --branch main --external-tool gemini
 
 ## Review Phases
 
-### Phase 1: First Review (5 Agents)
+### Phase 1: First Review (Parallel Agents)
 
-The skill launches 5 specialized agents **in parallel** using the Agent tool, passing the git diff to each:
+The skill launches specialized agents **in parallel** using the Agent tool, passing the git diff to each. The agent set is resolved from the configuration hierarchy — custom agents override built-in ones.
+
+**Built-in agents** (used when no overrides exist):
 
 | Agent | Focus |
 |-------|-------|
@@ -98,7 +130,8 @@ The skill launches 5 specialized agents **in parallel** using the Agent tool, pa
 
 - The skill runs `python scripts/run_review.py` to invoke the external tool
 - External tool analyzes code in sandbox/read-only mode
-- The skill evaluates findings directly, fixes valid issues, dismisses invalid ones
+- The skill evaluates findings: fixes valid issues, dismisses clearly invalid ones
+- **Disputed findings** trigger a structured discussion — Claude sends counter-arguments, the external tool responds with WITHDRAW/MAINTAIN/COMPROMISE, up to 10 rounds per finding
 - Loops until external tool finds nothing new
 
 ### Phase 3: Final Review (2 Agents)
@@ -123,19 +156,22 @@ Options:
   --pi-thinking         Pi thinking level: off, minimal, low, medium, high, xhigh
   --pi-options          Additional Pi CLI options
   --previous-context    Dismissed findings from prior iterations
+  --discuss             Discussion mode: debate disputed findings
+  --discussion-context  The dispute exchange (findings + counter-arguments)
 ```
 
 ## Workflow
 
 1. **Gather context**: `git diff` and `git log` against base branch
-2. **Launch agents**: 5 agents run in parallel via Agent tool
+2. **Launch agents**: Agents run in parallel via Agent tool
 3. **Verify findings**: Read actual code to confirm each finding
 4. **Fix confirmed issues**: Apply changes using Edit tool
 5. **Run tests + linter**: Verify fixes via Bash
 6. **Commit**: `git commit -m "fix: address code review findings"`
 7. **Loop**: Re-run agents to verify fixes, continue until clean
 8. **External review**: Run external tool, evaluate findings, fix valid issues
-9. **Final review**: 2 agents, critical/major only
+9. **Discuss disputes**: Debate non-trivial disagreements with external reviewer (up to 10 rounds)
+10. **Final review**: Critical/major issues only
 
 ## Notes
 

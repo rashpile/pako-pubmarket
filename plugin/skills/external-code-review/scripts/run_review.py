@@ -68,6 +68,8 @@ class ReviewConfig:
     pi_thinking: str = "high"  # thinking level: off, minimal, low, medium, high, xhigh
     pi_options: Optional[list[str]] = None  # additional CLI options
     previous_context: str = ""  # dismissed findings from prior iterations
+    discussion_mode: bool = False  # discussion mode: debate disputed findings
+    discussion_context: str = ""  # the dispute: finding + counter-argument exchange
 
 
 class ExternalReviewRunner:
@@ -124,6 +126,9 @@ Do NOT re-report these unless you have new evidence:
 {self.config.previous_context}
 """
 
+        if self.config.discussion_mode:
+            return self._build_discussion_prompt(diff)
+
         return f"""Review the following code changes for bugs, security issues, and quality problems.
 
 CODE CHANGES:
@@ -136,6 +141,27 @@ Report each issue with:
 - Fix: suggestion
 
 Report problems only - no positive observations.{ctx_section}"""
+
+    def _build_discussion_prompt(self, diff: str) -> str:
+        """Build the discussion prompt for debating disputed findings."""
+        return f"""You are in a code review discussion. Another reviewer (Claude) disagrees with some of your findings.
+
+Review the counter-arguments below carefully. For each disputed finding, respond with ONE of:
+
+1. **WITHDRAW** — You accept the counter-argument. State why briefly.
+2. **MAINTAIN** — You still believe this is a real issue. Provide NEW evidence or reasoning not already presented. Reference specific code paths, edge cases, or conditions that support your position.
+3. **COMPROMISE** — You partially agree. Clarify the narrower scope of the issue that still stands.
+
+Be rigorous. If the counter-argument is valid, withdraw. If you have genuine new evidence, present it. Do NOT simply restate your original finding.
+
+CODE CHANGES:
+{diff}
+
+## Discussion so far
+
+{self.config.discussion_context}
+
+Respond to each disputed finding using the format above."""
 
     def run_codex(self, prompt: str) -> tuple[str, bool]:
         """Run Codex CLI."""
@@ -255,17 +281,27 @@ def main():
                         help="Additional Pi CLI options as JSON array (e.g. '[\"--verbose\"]')")
     parser.add_argument("--previous-context", default="",
                         help="Dismissed findings from prior iterations (passed to external tool)")
+    parser.add_argument("--discuss", action="store_true", default=False,
+                        help="Discussion mode: debate disputed findings with counter-arguments")
+    parser.add_argument("--discussion-context", default="",
+                        help="The dispute exchange: findings + counter-arguments so far")
 
     args = parser.parse_args()
 
-    # Load config.json for defaults
-    config_path = Path.home() / ".claude" / "external-code-review" / "config.json"
+    # Load config.json — project > user > empty (first found wins, no merging)
+    _config_candidates = [
+        Path(".claude") / "external-code-review" / "config.json",       # project-local
+        Path.home() / ".claude" / "external-code-review" / "config.json",  # user-global
+    ]
     file_config = {}
-    if config_path.exists():
-        try:
-            file_config = json.loads(config_path.read_text())
-        except Exception as e:
-            print(f"Warning: could not load config from {config_path}: {e}", file=sys.stderr)
+    for config_path in _config_candidates:
+        if config_path.exists():
+            try:
+                file_config = json.loads(config_path.read_text())
+                print(f"Loaded config from {config_path}", file=sys.stderr)
+                break
+            except Exception as e:
+                print(f"Warning: could not load config from {config_path}: {e}", file=sys.stderr)
 
     # Validate pi_options (CLI arg is JSON string, config is list)
     cli_pi_options = None
@@ -301,6 +337,8 @@ def main():
         pi_thinking=pi_thinking_val,
         pi_options=raw_pi_options,
         previous_context=args.previous_context,
+        discussion_mode=args.discuss,
+        discussion_context=args.discussion_context,
     )
 
     runner = ExternalReviewRunner(config)

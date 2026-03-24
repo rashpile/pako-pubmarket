@@ -8,7 +8,7 @@ allowed-tools: Bash(git *), Bash(python *), Bash(npm *), Bash(npx *), Bash(make 
 
 Multi-phase code review system using external AI models (Codex, Gemini, and Pi) with parallel specialized agents.
 
-The skill orchestrates all review phases directly — no subprocess escalation or `--dangerously-skip-permissions`. External tools run in read-only/sandbox mode; all fixes happen in the user's session with normal permissions.
+External tools run in read-only/sandbox mode.
 
 ## Prerequisites
 
@@ -17,9 +17,32 @@ Required CLI tools (at least one external tool recommended):
 - `gemini` - Gemini CLI (Google) - optional, fallback when codex unavailable
 - `pi` - [Pi CLI](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) (multimodel) - optional, fallback when codex and gemini unavailable
 
+## Configuration Hierarchy
+
+Configuration is resolved with **project > user > built-in** precedence. This applies to both `config.json` and `agents/*.txt`:
+
+| Priority | Location | Scope |
+|----------|----------|-------|
+| 1 (highest) | `./.claude/external-code-review/` | Project-local |
+| 2 | `~/.claude/external-code-review/` | User-global |
+| 3 (lowest) | Built-in (skill directory) | Default |
+
+The first level that contains the resource wins — no merging between levels.
+
+## Custom Review Agents
+
+Place `.txt` files in `agents/` at either config level to override the built-in review agents. Each `.txt` file defines one agent — the filename (without extension) becomes the agent name, and the file content is the agent's review prompt.
+
+Resolution order:
+1. `./.claude/external-code-review/agents/*.txt` — project-local overrides
+2. `~/.claude/external-code-review/agents/*.txt` — user-global overrides
+3. Built-in `agents/` directory
+
+If at least one `.txt` file exists at a higher-priority level, **all** lower-level agents are ignored.
+
 ## Model Configuration
 
-Optional config file at `~/.claude/external-code-review/config.json`:
+Optional `config.json` at either config level (project takes precedence over user):
 
 ```json
 {
@@ -67,9 +90,13 @@ Run all 3 phases as described below.
 
 ## Review Phases
 
-### Phase 1: First Review (5 Agents in Parallel)
+### Phase 1: First Review (Parallel Agents)
 
-Launch 5 specialized agents simultaneously using the Agent tool:
+Launch specialized agents simultaneously using the Agent tool. Agent set is resolved at runtime:
+
+- **Project overrides** (`./.claude/external-code-review/agents/*.txt`): Highest priority. If at least one `.txt` file exists, use only those agents.
+- **User overrides** (`~/.claude/external-code-review/agents/*.txt`): Used if no project overrides exist. File name = agent name.
+- **Built-in defaults** (when no overrides exist):
 
 | Agent | Focus Area | Prompt File |
 |-------|------------|-------------|
@@ -83,7 +110,7 @@ Launch 5 specialized agents simultaneously using the Agent tool:
 
 - Run external tool via the script (read-only/sandbox mode)
 - Get independent perspective from a different model family
-- Evaluate findings directly and fix valid issues
+- Evaluate findings: fix valid issues, discuss disputed ones (up to 10 rounds per finding)
 - Tool selection: auto-detects available CLI, or user can specify
 
 ### Phase 3: Final Review (2 Agents)
@@ -124,13 +151,39 @@ git diff main...HEAD
 
 Save the diff output — you'll pass it to the review agents.
 
-### 2. Run Phase 1: First Review (5 Agents)
+### 2. Run Phase 1: First Review (Agents)
 
-Read each agent prompt from `agents/*.txt`. Launch ALL 5 agents in parallel using the Agent tool. Each agent receives the git diff and its specialized prompt.
+**Agent resolution — project > user > built-in:**
+
+1. Check if `./.claude/external-code-review/agents/` contains any `.txt` files (use Glob)
+2. If not, check `~/.claude/external-code-review/agents/` for `.txt` files
+3. If neither override directory has `.txt` files, use the built-in `agents/*.txt`
+4. The first level with at least one `.txt` file wins — all lower levels are ignored
+
+The file name (without `.txt`) becomes the agent name.
+
+Launch ALL resolved agents in parallel using the Agent tool. Each agent receives the git diff and its specialized prompt.
 
 ```
-For each agent in [quality, implementation, testing, simplification, documentation]:
-  Read agents/<agent>.txt
+project_dir = ./.claude/external-code-review/agents/
+user_dir    = ~/.claude/external-code-review/agents/
+builtin_dir = agents/   (relative to skill)
+
+project_agents = Glob(project_dir/*.txt)
+user_agents    = Glob(user_dir/*.txt)
+
+if project_agents is not empty:
+  agent_dir = project_dir
+  agents = [filename without .txt for each file in project_agents]
+elif user_agents is not empty:
+  agent_dir = user_dir
+  agents = [filename without .txt for each file in user_agents]
+else:
+  agent_dir = builtin_dir
+  agents = [quality, implementation, testing, simplification, documentation]
+
+For each agent in agents:
+  Read <agent_dir>/<agent>.txt
   Agent(prompt = agent_prompt + "\n\nCode changes to review:\n" + git_diff)
 ```
 
@@ -178,32 +231,66 @@ Read the script output. For EACH finding:
 
 Categorize as:
 - **Valid issues** → Fix using Edit tool, run tests, DO NOT commit yet
-- **Invalid/irrelevant** → Note why (will be passed as previous context)
+- **Disputed** → You disagree with the finding but it raises a non-trivial point → enter Discussion (step 6)
+- **Invalid/irrelevant** → Clearly wrong (wrong file, outdated info, style-only) → dismiss, pass as `--previous-context`
 
-### 6. Loop External Review
+### 6. Discussion with External Reviewer
+
+When you disagree with a non-trivial finding, engage in a structured debate instead of dismissing it:
+
+1. Build the discussion context — a structured exchange of the finding and your counter-argument:
+   ```
+   ## Finding: <summary>
+   **External reviewer:** <original finding with location and reasoning>
+   **Claude (round 1):** <your counter-argument — reference specific code, explain why it's safe/correct>
+   ```
+
+2. Run the script in discussion mode:
+   ```bash
+   python scripts/run_review.py --branch main --discuss --discussion-context "<exchange>"
+   ```
+
+3. Parse the external reviewer's response. For each disputed finding they will respond with:
+   - **WITHDRAW** — Dispute resolved. No action needed.
+   - **MAINTAIN** — They provide new evidence. Read the referenced code, evaluate the new argument.
+   - **COMPROMISE** — Narrower issue. Evaluate the reduced scope.
+
+4. If the external reviewer maintains with new evidence you find compelling → fix the issue.
+   If you still disagree → append your new counter-argument to the discussion context and run step 2 again.
+
+5. Continue until all disputes are resolved (WITHDRAW/COMPROMISE/fix) or **max 10 discussion rounds** reached.
+
+6. If max rounds reached without resolution, Claude makes the final call — dismiss or fix based on the accumulated evidence. Log the full exchange and the decision rationale in the review report.
+
+**Important:** Only enter discussion for findings that are substantive and where the external reviewer might have a point. Clearly invalid findings (wrong file, misread code) should be dismissed via `--previous-context` without discussion.
+
+### 7. Loop External Review
+
+After fixing valid issues and resolving discussions:
 
 If valid issues were fixed:
 - Run the script again to verify fixes (external tool re-checks)
 
-If all findings were dismissed:
+If all remaining findings were dismissed:
 - Run script again with `--previous-context` containing dismissal explanations
 - This prevents the external tool from re-reporting the same findings
 
-If the external tool finds nothing:
+If the external tool finds nothing new:
 - Commit all accumulated fixes: `git commit -m "fix: address external review findings"`
 - External review is complete
 
-Max iterations: 3. If max reached, commit any fixes and move on.
+Max review iterations: 3 (separate from the 10-round discussion limit per finding).
 
-### 7. Run Phase 3: Final Review (2 Agents)
+### 8. Run Phase 3: Final Review
 
 Same as Phase 1 but:
-- Only 2 agents: quality + implementation
+- If using **built-in agents**: only 2 agents (quality + implementation)
+- If using **user override agents**: only agents whose names contain "quality" or "implementation" (case-insensitive). If no override agents match, run all override agents but with the final-review constraint below.
 - Focus on **critical/major issues only**
 - Ignore style/minor issues
 - Max iterations: 3
 
-### 8. Generate Review Report
+### 9. Generate Review Report
 
 After all phases complete, output structured report:
 
@@ -223,6 +310,9 @@ After all phases complete, output structured report:
 ## Phase 2: External Review
 - [VALID] Finding + fix applied
 - [INVALID] Finding + rationale
+- [DISCUSSED → FIXED] Finding + discussion summary (N rounds)
+- [DISCUSSED → WITHDRAWN] Finding withdrawn by external reviewer (N rounds)
+- [DISCUSSED → DISMISSED] Finding + full exchange + Claude's decision rationale (max rounds reached)
 
 ## Phase 3: Final Review
 - No critical/major issues remaining
@@ -234,7 +324,11 @@ After all phases complete, output structured report:
 
 ## Agent Definitions
 
-See `agents/` directory for full agent prompts:
+Agent prompts are resolved with project > user > built-in precedence (see Configuration Hierarchy above).
+
+**Project overrides**: `./.claude/external-code-review/agents/*.txt`
+**User overrides**: `~/.claude/external-code-review/agents/*.txt`
+**Built-in defaults**: `agents/` directory:
 
 - `agents/quality.txt` - Quality & security review
 - `agents/implementation.txt` - Goal achievement verification
@@ -258,6 +352,8 @@ Options:
   --pi-thinking       Pi thinking level: off, minimal, low, medium, high, xhigh
   --pi-options        Additional Pi CLI options
   --previous-context  Dismissed findings from prior iterations
+  --discuss           Discussion mode: debate disputed findings
+  --discussion-context  The dispute exchange (findings + counter-arguments)
 ```
 
 ## Notes
