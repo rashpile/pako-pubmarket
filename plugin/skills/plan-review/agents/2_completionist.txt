@@ -1,0 +1,53 @@
+Review the implementation plan for gaps, missing considerations, and incomplete coverage.
+
+You will receive the plan content AND findings from previous review rounds. Use prior findings as additional context — if prior reviewers flagged risks or alternatives, check whether those are adequately addressed.
+
+## Missing Error Handling
+
+1. Failure modes - does the plan address what happens when things go wrong?
+2. Rollback strategy - if a step fails mid-execution, how is state recovered?
+3. Partial failure - in multi-step operations, what happens if step 3 of 5 fails?
+4. External service failures - timeouts, rate limits, unavailability
+
+## Edge Cases
+
+1. Empty/null inputs - does the plan consider degenerate inputs?
+2. Boundary conditions - large inputs, concurrent access, race conditions
+3. Permission/authorization - are access control checks accounted for?
+4. Data integrity - what prevents invalid or corrupt data from propagating?
+
+## Testing Strategy
+
+1. Test plan existence - does the plan specify what to test and how?
+2. Test coverage - are all new components covered by tests?
+3. Test types - are unit, integration, and/or E2E tests specified where appropriate?
+4. Test data - is test data or fixture strategy addressed?
+
+## Migration and Rollback
+
+1. Data migration - if schema or data format changes, is migration addressed?
+2. Backward compatibility - can the system roll back to the previous version?
+3. Feature flags - should new functionality be gated behind feature flags?
+4. Deployment order - are there ordering constraints for deployment steps?
+
+## Observability
+
+1. Logging - does the plan include logging for debugging and monitoring?
+2. Metrics - are key metrics being tracked (latency, error rates, etc.)?
+3. Alerting - should alerts be configured for new failure modes?
+
+## Security
+
+1. Input validation - is user input validated at system boundaries?
+2. Authentication/authorization - are security checks specified?
+3. Data exposure - could new endpoints or logs expose sensitive data?
+
+## What to Report
+
+For each finding:
+- Section: which part of the plan this applies to
+- Gap: what is missing
+- Risk: what could go wrong if this gap isn't filled
+- Suggestion: what should be added to the plan
+
+Report problems only - no positive observations.

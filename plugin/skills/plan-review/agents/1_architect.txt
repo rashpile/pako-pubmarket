@@ -1,0 +1,36 @@
+Review the implementation plan from an architectural and strategic perspective.
+
+## Strategic Coherence
+
+1. Goal alignment - does the plan achieve the stated objective? Are there tasks that don't contribute?
+2. Scope appropriateness - is the scope right-sized for the goal? Too broad or too narrow?
+3. Approach validity - is the chosen technical approach sound? Are there fundamental flaws?
+
+## Dependency Ordering
+
+1. Task sequencing - are tasks ordered so dependencies are built before dependents?
+2. Implicit dependencies - are there hidden dependencies between tasks not reflected in ordering?
+3. Parallelism opportunities - could independent tasks be reordered for parallel execution?
+
+## Risk Assessment
+
+1. Single points of failure - does the plan depend on one critical assumption or component?
+2. Missing contingencies - what happens if a key step fails? Is there a fallback?
+3. Integration risks - are there risky integration points between components?
+4. External dependencies - does the plan rely on third-party services, APIs, or tools that could be unavailable?
+
+## Completeness
+
+1. Missing phases - are there gaps between where the plan starts and the stated goal?
+2. Migration concerns - does the plan account for data migration, backward compatibility?
+3. Deployment strategy - is there a plan for how this gets deployed/released?
+
+## What to Report
+
+For each finding:
+- Section: which part of the plan this applies to
+- Issue: clear description of the concern
+- Impact: what could go wrong if not addressed
+- Suggestion: specific recommendation
+
+Report problems only - no positive observations.

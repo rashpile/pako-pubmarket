@@ -32,6 +32,29 @@ See the [full skill documentation](plugin/skills/external-code-review/README.md)
 
 Agent prompts are sourced from [ralphex](https://github.com/umputun/ralphex) by [Umputun](https://github.com/umputun).
 
+### [plan-review](plugin/skills/plan-review/)
+
+Multi-round plan review that validates implementation plans before code is written. Specialized agents run in configurable rounds — catching architectural flaws, over-engineering, convention violations, and completeness gaps at the design stage.
+
+**How it works:**
+
+1. **Round 1** — architect + simplifier agents run in parallel, reviewing strategy and complexity
+2. **Synthesis** — orchestrator merges findings, flags conflicts between reviewers
+3. **Round 2** — conventions + completionist agents run in parallel, informed by round 1 findings
+4. **External Review** (optional) — independent model (Codex, Gemini, or Pi) provides holistic assessment
+5. **Annotation** — plan file annotated inline with HTML comments per finding
+
+**Why use it:**
+- Catch issues at the plan stage — cheaper than fixing them in code
+- Multi-round review: later agents see earlier findings, catching cross-cutting concerns
+- Configurable agent ordering via `N_name.txt` filename convention
+- Interactive `--config` mode to customize agents per project
+- Works with any plan format: markdown specs, structured plans, or freeform text
+
+**Usage:** Ask Claude Code for a "plan review" or "review my plan". To customize agents, ask to "configure plan review" or use `--config`.
+
+See the [full skill documentation](plugin/skills/plan-review/README.md) for configuration, agent customization, and the naming convention.
+
 ### [second-opinion](plugin/skills/second-opinion/)
 
 Get a second opinion from external AI models. Gathers current task context with full code and sends it to Codex, Gemini, Claude CLI, or saves for manual copy-paste. External responses are critically evaluated — never relayed blindly.
@@ -67,6 +90,7 @@ plugin/
 ├── .claude-plugin/plugin.json     # Plugin metadata
 └── skills/                        # Skill definitions
     ├── external-code-review/      # Multi-phase AI code review
+    ├── plan-review/               # Multi-round plan review
     ├── second-opinion/            # External AI consultation (open)
     └── second-opinion-nda/        # NDA-safe consultation (manual only)
 ```

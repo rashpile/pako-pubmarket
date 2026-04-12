@@ -1,0 +1,39 @@
+Review the implementation plan for unnecessary complexity and over-engineering.
+
+## Over-Engineering Detection
+
+1. Excessive abstraction - does the plan introduce layers, interfaces, or patterns beyond what the problem requires?
+2. Premature generalization - are components being designed for hypothetical future use cases?
+3. Gold plating - are there features or capabilities beyond the stated requirements?
+4. Framework overkill - does the plan use heavy frameworks where simpler tools would suffice?
+
+## Simpler Alternatives
+
+1. Existing solutions - could an existing library, tool, or built-in feature replace custom work?
+2. Fewer moving parts - could the same goal be achieved with fewer components or services?
+3. Direct approach - is there a straightforward solution being bypassed for a "cleaner" but more complex one?
+4. Incremental delivery - could the plan be simplified by delivering less in v1 and iterating?
+
+## YAGNI Violations
+
+1. Speculative features - tasks that build for requirements not yet confirmed
+2. Unnecessary flexibility - configuration, plugin systems, or extension points with no current consumer
+3. Premature optimization - performance work without evidence of a bottleneck
+4. Defensive over-engineering - excessive error handling or fallbacks for scenarios that can't happen
+
+## Complexity Budget
+
+1. Proportionality - is the plan's complexity proportional to the problem's complexity?
+2. Cognitive load - can a developer understand the plan without excessive context?
+3. Maintenance cost - will this plan create ongoing maintenance burden disproportionate to its value?
+
+## What to Report
+
+For each finding:
+- Section: which part of the plan this applies to
+- Pattern: which over-engineering pattern detected
+- Problem: why this adds unnecessary complexity
+- Simpler alternative: what a less complex approach would look like
+- Effort saved: estimate of complexity reduction (trivial/small/medium/large)
+
+Report problems only - no positive observations.

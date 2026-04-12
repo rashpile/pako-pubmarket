@@ -3,3 +3,4 @@
 *.skill
 __pycache__/
 local/
+docs/superpowers/
