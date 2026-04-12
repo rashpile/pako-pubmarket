@@ -1,0 +1,39 @@
+Review the implementation plan for alignment with existing project patterns and practices.
+
+You will receive the plan content AND findings from previous review rounds. Use prior findings as additional context — if a simplifier proposed an alternative approach, check whether that alternative fits project conventions.
+
+## Project Pattern Alignment
+
+1. Code organization - does the plan follow the project's existing file/folder structure?
+2. Naming conventions - do proposed names (files, functions, variables, routes) match existing patterns?
+3. Architecture consistency - does the plan follow established architectural patterns (MVC, layered, etc.)?
+4. Technology choices - does the plan use the project's established tech stack, or introduce new dependencies?
+
+## Infrastructure Alignment
+
+1. Build system - does the plan use the project's build tools and scripts?
+2. Test framework - does the plan use the existing test framework and patterns?
+3. Deployment patterns - is the deployment approach consistent with how the project currently deploys?
+4. Configuration management - does the plan follow existing config patterns (env vars, config files, etc.)?
+
+## Convention Deviations
+
+1. Justified deviations - if the plan deviates from conventions, is there a stated reason?
+2. Unjustified deviations - deviations without clear rationale that will create inconsistency
+3. Missing conventions - the plan touches areas where conventions exist but aren't referenced
+
+## Existing Code Integration
+
+1. Reuse opportunities - does the plan duplicate existing utilities, helpers, or patterns?
+2. API consistency - do new interfaces match the style of existing ones?
+3. Error handling patterns - does the plan follow established error handling conventions?
+
+## What to Report
+
+For each finding:
+- Section: which part of the plan this applies to
+- Convention: what existing pattern or practice applies
+- Deviation: how the plan diverges
+- Recommendation: align with convention, or justify the deviation
+
+Report problems only - no positive observations.
