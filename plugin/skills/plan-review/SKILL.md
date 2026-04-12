@@ -1,7 +1,7 @@
 ---
 name: plan-review
-description: Multi-round plan review using parallel specialized agents. Validates implementation plans before code is written. Agents run in configurable rounds using N_name.txt naming convention. Produces annotated plan with inline findings. Optional external model review (Codex/Gemini/Pi). Triggers on "plan review", "review plan", "review my plan", "validate plan", or "check plan".
-allowed-tools: Bash(python *), Read, Write, Edit, Grep, Glob, Agent
+description: Multi-round plan review using parallel specialized agents. Validates implementation plans before code is written. Agents run in configurable rounds using N_name.txt naming convention. Produces annotated plan with inline findings. Optional external model review (Codex/Gemini/Pi). Triggers on "plan review", "review plan", "review my plan", "validate plan", "check plan", "plan-review --config", or "configure plan review".
+allowed-tools: Bash(python *), Bash(mkdir *), Bash(mv *), Bash(rm *), Read, Write, Edit, Grep, Glob, Agent
 ---
 
 # Plan Review
@@ -78,7 +78,99 @@ Optional `config.json` at either config level (project takes precedence over use
 | conventions | 2 | Project patterns, infrastructure alignment | `agents/2_conventions.txt` |
 | completionist | 2 | Gaps, error handling, testing, security | `agents/2_completionist.txt` |
 
-## Workflow
+## Mode Detection
+
+If the user invoked this skill with `--config`, `configure`, or explicitly asked to configure/customize the plan review, enter **Config Mode** below. Otherwise, enter **Review Mode** (the normal Workflow).
+
+---
+
+## Config Mode
+
+Interactive configuration wizard for customizing plan review agents in the current project.
+
+### C1. Copy Built-in Agents to Project
+
+Create `.claude/plan-review/agents/` in the project directory if it doesn't exist. Copy all built-in agent files from the skill's `agents/` directory into it.
+
+```
+mkdir -p .claude/plan-review/agents/
+```
+
+For each built-in agent file (`1_architect.txt`, `1_simplifier.txt`, `2_conventions.txt`, `2_completionist.txt`):
+- Read the file from the skill's `agents/` directory
+- Write it to `.claude/plan-review/agents/` with the same filename
+
+Tell the user: "Copied N built-in agents to `.claude/plan-review/agents/`. These are now your project-local agents — you can customize them freely."
+
+### C2. Create New Agents (Optional)
+
+Ask the user: "Would you like to create any new custom review agents?"
+
+If yes, for each new agent:
+1. Ask for the agent's **name** (e.g., "security", "performance", "accessibility")
+2. Ask for the agent's **focus area** — what should it review?
+3. Help write the agent prompt following the same structure as built-in agents:
+   - Section headings for review categories
+   - Numbered checklist items under each section
+   - "What to Report" section with finding format
+   - "Report problems only - no positive observations" footer
+4. Write the prompt to `.claude/plan-review/agents/<name>.txt` (no round prefix yet — ordering happens next)
+
+Repeat until the user has no more agents to add.
+
+### C3. Assign Round Ordering
+
+List all agent files currently in `.claude/plan-review/agents/` (both copied and newly created).
+
+Present them to the user as a numbered list:
+```
+Current agents:
+1. architect — Strategy, dependencies, risks, sequencing
+2. simplifier — Over-engineering, YAGNI, simpler alternatives
+3. conventions — Project patterns, infrastructure alignment
+4. completionist — Gaps, error handling, testing, security
+5. security — (newly created)
+```
+
+For each agent, ask the user to assign a **round number** (1, 2, 3, etc.) or **skip** to remove it.
+
+- Agents assigned the same round number will run in parallel
+- Rounds execute sequentially in ascending order
+- Present one agent at a time: "What round should **architect** run in? (1/2/3/skip)"
+
+### C4. Apply Ordering
+
+After all assignments:
+
+1. **Rename** each kept agent file to include its round prefix: `N_name.txt`
+2. **Delete** any agent files the user skipped
+3. Show the final configuration:
+
+```
+Plan review agents configured:
+
+Round 1 (parallel):
+  - 1_architect.txt
+  - 1_simplifier.txt
+
+Round 2 (parallel):
+  - 2_conventions.txt
+  - 2_completionist.txt
+  - 2_security.txt
+
+Removed:
+  - (none)
+
+Agents saved to: .claude/plan-review/agents/
+```
+
+### C5. Config.json (Optional)
+
+Ask the user if they want to customize `config.json` settings (external review, model, max rounds). If yes, create or update `.claude/plan-review/config.json` with their choices.
+
+---
+
+## Review Mode (Workflow)
 
 ### 1. Plan Discovery
 
