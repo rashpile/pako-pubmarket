@@ -1,7 +1,16 @@
 ---
 name: external-code-review
 description: Multi-phase code review using external AI models (Codex CLI, Gemini CLI, and Pi CLI) with parallel review agents. Use when user wants external model verification, multi-agent code analysis, or autonomous review with fixes. Triggers on requests like "external code review", "multi-agent review", "review with external models", "review with gemini", "review with pi", or "comprehensive code analysis".
-allowed-tools: Bash(git *), Bash(python *), Bash(npm *), Bash(npx *), Bash(make *), Bash(go *), Bash(cargo *), Read, Write, Edit, Grep, Glob, Agent
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - Task
+  - TodoWrite
+  - AskUserQuestion
 ---
 
 # External Code Review
