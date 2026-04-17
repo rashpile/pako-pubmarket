@@ -21,3 +21,5 @@ allowed-tools: Read, Edit, Bash, AskUserQuestion
 6. Push the changes to the remote repository
 
 7. Report the completed version update to the user
+
+8. Propose user to run '/plugin update pako-public-marketplace' to update plugin
