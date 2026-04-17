@@ -36,7 +36,7 @@ Configuration is resolved with **project > user > built-in** precedence. This ap
 | 2 | `~/.claude/external-code-review/` | User-global |
 | 3 (lowest) | Built-in (skill directory) | Default |
 
-The first level that contains the resource wins — no merging between levels.
+The first level that contains the resource wins — no merging between levels. Use `${CLAUDE_SKILL_DIR}/scripts/resolve_agents.sh` and `resolve_config.sh` to inspect what will actually be used at runtime — never probe the directories manually.
 
 ## Custom Review Agents
 
@@ -135,10 +135,10 @@ Launch specialized agents simultaneously using the Agent tool. Agent set is reso
 Before running the review, verify you're on a feature branch with committed changes:
 
 ```bash
-git branch --show-current
-git status
-git log main..HEAD --oneline
+${CLAUDE_SKILL_DIR}/scripts/check_branch.sh main
 ```
+
+Output reports the current branch, working-tree status, and commits ahead of the base.
 
 **If on main/master branch:**
 1. Create a feature branch first: `git checkout -b review/code-review-$(date +%Y%m%d)`
@@ -154,47 +154,37 @@ git log main..HEAD --oneline
 ### 1. Gather Context
 
 ```bash
-git log main..HEAD --oneline
-git diff main...HEAD
+${CLAUDE_SKILL_DIR}/scripts/gather_context.sh main
 ```
 
-Save the diff output — you'll pass it to the review agents.
+Output has two sections — `=== commits ===` and `=== diff ===`. Pass the diff section to the review agents.
 
 ### 2. Run Phase 1: First Review (Agents)
 
 **Agent resolution — project > user > built-in:**
 
-1. Check if `./.claude/external-code-review/agents/` contains any `.txt` files (use Glob)
-2. If not, check `~/.claude/external-code-review/agents/` for `.txt` files
-3. If neither override directory has `.txt` files, use the built-in `agents/*.txt`
-4. The first level with at least one `.txt` file wins — all lower levels are ignored
+Run the resolver script to get the winning directory and agent names:
 
-The file name (without `.txt`) becomes the agent name.
-
-Launch ALL resolved agents in parallel using the Agent tool. Each agent receives the git diff and its specialized prompt.
-
+```bash
+${CLAUDE_SKILL_DIR}/scripts/resolve_agents.sh
 ```
-project_dir = ./.claude/external-code-review/agents/
-user_dir    = ~/.claude/external-code-review/agents/
-builtin_dir = agents/   (relative to skill)
 
-project_agents = Glob(project_dir/*.txt)
-user_agents    = Glob(user_dir/*.txt)
-
-if project_agents is not empty:
-  agent_dir = project_dir
-  agents = [filename without .txt for each file in project_agents]
-elif user_agents is not empty:
-  agent_dir = user_dir
-  agents = [filename without .txt for each file in user_agents]
-else:
-  agent_dir = builtin_dir
-  agents = [quality, implementation, testing, simplification, documentation]
-
-For each agent in agents:
-  Read <agent_dir>/<agent>.txt
-  Agent(prompt = agent_prompt + "\n\nCode changes to review:\n" + git_diff)
+Output:
 ```
+dir: <absolute-path-to-winning-agent-dir>
+agents:
+quality
+implementation
+testing
+simplification
+documentation
+```
+
+For each agent listed:
+1. Read `<dir>/<agent>.txt` with the Read tool
+2. Launch via the Agent tool with prompt = agent_prompt + "\n\nCode changes to review:\n" + git_diff
+
+Launch ALL resolved agents **in parallel** (single message, multiple Agent tool calls).
 
 ### 3. Process First Review Findings
 
@@ -215,17 +205,17 @@ IMPORTANT: Pre-existing issues (linter errors, failed tests) should also be fixe
 Run the external review script via Bash:
 
 ```bash
-python scripts/run_review.py --branch main
+${CLAUDE_SKILL_DIR}/scripts/run_review.py --branch main
 ```
 
 Options:
 ```bash
 # Force specific tool
-python scripts/run_review.py --branch main --external-tool gemini
-python scripts/run_review.py --branch main --external-tool pi
+${CLAUDE_SKILL_DIR}/scripts/run_review.py --branch main --external-tool gemini
+${CLAUDE_SKILL_DIR}/scripts/run_review.py --branch main --external-tool pi
 
 # With previous context (dismissed findings)
-python scripts/run_review.py --branch main --previous-context "..."
+${CLAUDE_SKILL_DIR}/scripts/run_review.py --branch main --previous-context "..."
 ```
 
 The script runs the external tool in read-only mode and prints findings to stdout.
@@ -256,7 +246,7 @@ When you disagree with a non-trivial finding, engage in a structured debate inst
 
 2. Run the script in discussion mode:
    ```bash
-   python scripts/run_review.py --branch main --discuss --discussion-context "<exchange>"
+   ${CLAUDE_SKILL_DIR}/scripts/run_review.py --branch main --discuss --discussion-context "<exchange>"
    ```
 
 3. Parse the external reviewer's response. For each disputed finding they will respond with:
@@ -345,12 +335,26 @@ Agent prompts are resolved with project > user > built-in precedence (see Config
 - `agents/simplification.txt` - Over-engineering detection
 - `agents/documentation.txt` - Documentation updates
 
-## Script Usage
+## Scripts
 
-The script `scripts/run_review.py` is a thin wrapper that runs external tools only:
+All skill operations run through static scripts in `${CLAUDE_SKILL_DIR}/scripts/`. This gives the user a stable permission surface: allow `${CLAUDE_SKILL_DIR}/scripts/*` once instead of approving each dynamic `git`/config probe. Never inline these commands — always call the script.
+
+| Script | Purpose |
+|--------|---------|
+| `check_branch.sh [base]` | Print current branch, working-tree status, commits ahead of base (default `main`). |
+| `gather_context.sh [base]` | Print `=== commits ===` log and `=== diff ===` against base. |
+| `resolve_agents.sh` | Print the winning agent directory (project > user > built-in) and agent names. |
+| `resolve_config.sh` | Print the winning `config.json` path and contents (project > user > none). |
+| `run_review.py` | Run external review tool (Codex/Gemini/Pi). See options below. |
+
+All scripts accept absolute paths and work from the project's CWD (do not `cd` elsewhere before invoking).
+
+### run_review.py
+
+Thin wrapper that runs external tools only:
 
 ```bash
-python scripts/run_review.py [options]
+${CLAUDE_SKILL_DIR}/scripts/run_review.py [options]
 
 Options:
   --branch, -b        Base branch for diff (default: main)

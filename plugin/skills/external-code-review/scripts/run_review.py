@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 External Review Tool Runner
 
@@ -12,13 +12,13 @@ Usage:
     python run_review.py --branch main --previous-context "dismissed findings..."
 """
 
-import subprocess
-import sys
 import argparse
 import json
-from pathlib import Path
+import subprocess
+import sys
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 
@@ -39,14 +39,20 @@ def _detect_external_tool(preferred: str = "auto") -> ExternalTool:
     codex -> gemini -> pi. If none found, return codex (will fail with
     clear error when run).
     """
-    _tool_map = {"codex": ExternalTool.CODEX, "gemini": ExternalTool.GEMINI, "pi": ExternalTool.PI}
+    _tool_map = {
+        "codex": ExternalTool.CODEX,
+        "gemini": ExternalTool.GEMINI,
+        "pi": ExternalTool.PI,
+    }
     if preferred in _tool_map:
         return _tool_map[preferred]
 
     # Auto-detect: probe in priority order (codex -> gemini -> pi)
     for name, tool in _tool_map.items():
         try:
-            result = subprocess.run([name, "--version"], capture_output=True, timeout=10)
+            result = subprocess.run(
+                [name, "--version"], capture_output=True, timeout=10
+            )
             if result.returncode == 0:
                 return tool
         except (OSError, subprocess.TimeoutExpired):
@@ -87,10 +93,7 @@ class ExternalReviewRunner:
         """Run a shell command and return (stdout, success). Stderr logged separately."""
         try:
             result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout
+                cmd, capture_output=True, text=True, timeout=timeout
             )
             if result.stderr.strip():
                 self._log(f"stderr: {result.stderr.strip()[:500]}", "⚠️")
@@ -104,9 +107,9 @@ class ExternalReviewRunner:
 
     def _get_git_diff(self) -> str:
         """Get git diff against base branch. Returns None on error, empty string if no changes."""
-        output, success = self._run_command([
-            "git", "diff", f"{self.config.branch}...HEAD"
-        ])
+        output, success = self._run_command(
+            ["git", "diff", f"{self.config.branch}...HEAD"]
+        )
         if not success:
             self._log(f"git diff failed: {output}", "❌")
             return None
@@ -167,15 +170,16 @@ Respond to each disputed finding using the format above."""
         """Run Codex CLI."""
         self._log("Running Codex review...", "🤖")
         cmd = [
-            "codex", "exec",
-            "--sandbox", self.config.codex_sandbox,
+            "codex",
+            "exec",
+            "--sandbox",
+            self.config.codex_sandbox,
         ]
         if self.config.codex_model:
             cmd.extend(["-c", f'model="{self.config.codex_model}"'])
-        cmd.extend([
-            "-c", f"model_reasoning_effort={self.config.codex_reasoning}",
-            prompt
-        ])
+        cmd.extend(
+            ["-c", f"model_reasoning_effort={self.config.codex_reasoning}", prompt]
+        )
         return self._run_command(cmd)
 
     def run_gemini(self, prompt: str) -> tuple[str, bool]:
@@ -235,24 +239,38 @@ def _validate_pi_options(raw: Optional[list]) -> Optional[list[str]]:
     if raw is None:
         return None
     if not isinstance(raw, list) or not all(isinstance(o, str) for o in raw):
-        print("Warning: pi_options must be a list of strings, ignoring", file=sys.stderr)
+        print(
+            "Warning: pi_options must be a list of strings, ignoring", file=sys.stderr
+        )
         return None
 
     _denied_prefixes = (
-        "--tools", "--no-tools", "--no-extensions", "--no-skills",
-        "--extensions", "--skills",
-        "--prompt", "--system-prompt", "--append-system-prompt",
-        "--model", "--thinking",
-        "--extension", "--skill", "--prompt-template",
+        "--tools",
+        "--no-tools",
+        "--no-extensions",
+        "--no-skills",
+        "--extensions",
+        "--skills",
+        "--prompt",
+        "--system-prompt",
+        "--append-system-prompt",
+        "--model",
+        "--thinking",
+        "--extension",
+        "--skill",
+        "--prompt-template",
         "--no-prompt-templates",
     )
     _denied_exact = {"--", "-p", "-e", "-ne", "-ns", "-np"}
     has_denied = any(
-        o.strip() in _denied_exact or any(o.strip().startswith(p) for p in _denied_prefixes)
+        o.strip() in _denied_exact
+        or any(o.strip().startswith(p) for p in _denied_prefixes)
         for o in raw
     )
     if has_denied:
-        print("Warning: pi_options contains restricted flags, ignoring", file=sys.stderr)
+        print(
+            "Warning: pi_options contains restricted flags, ignoring", file=sys.stderr
+        )
         return None
     return raw
 
@@ -260,37 +278,58 @@ def _validate_pi_options(raw: Optional[list]) -> Optional[list[str]]:
 def main():
     parser = argparse.ArgumentParser(
         description="Run external AI review tool (Codex/Gemini/Pi) and print findings",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument("--branch", "-b", default="main",
-                        help="Base branch for diff (default: main)")
-    parser.add_argument("--external-tool", default=None,
-                        choices=["auto", "codex", "gemini", "pi"],
-                        help="External tool: auto (codex->gemini->pi), codex, gemini, or pi")
-    parser.add_argument("--codex-model", default=None,
-                        help="Codex model to use")
-    parser.add_argument("--gemini-model", default=None,
-                        help="Gemini model to use")
-    parser.add_argument("--pi-model", default=None,
-                        help="Pi model (e.g. 'google/gemini-2.5-pro', 'anthropic/claude-sonnet-4-20250514')")
-    parser.add_argument("--pi-thinking", default=None,
-                        choices=["off", "minimal", "low", "medium", "high", "xhigh"],
-                        help="Pi thinking level (default: high)")
-    parser.add_argument("--pi-options", default=None,
-                        help="Additional Pi CLI options as JSON array (e.g. '[\"--verbose\"]')")
-    parser.add_argument("--previous-context", default="",
-                        help="Dismissed findings from prior iterations (passed to external tool)")
-    parser.add_argument("--discuss", action="store_true", default=False,
-                        help="Discussion mode: debate disputed findings with counter-arguments")
-    parser.add_argument("--discussion-context", default="",
-                        help="The dispute exchange: findings + counter-arguments so far")
+    parser.add_argument(
+        "--branch", "-b", default="main", help="Base branch for diff (default: main)"
+    )
+    parser.add_argument(
+        "--external-tool",
+        default=None,
+        choices=["auto", "codex", "gemini", "pi"],
+        help="External tool: auto (codex->gemini->pi), codex, gemini, or pi",
+    )
+    parser.add_argument("--codex-model", default=None, help="Codex model to use")
+    parser.add_argument("--gemini-model", default=None, help="Gemini model to use")
+    parser.add_argument(
+        "--pi-model",
+        default=None,
+        help="Pi model (e.g. 'google/gemini-2.5-pro', 'anthropic/claude-sonnet-4-20250514')",
+    )
+    parser.add_argument(
+        "--pi-thinking",
+        default=None,
+        choices=["off", "minimal", "low", "medium", "high", "xhigh"],
+        help="Pi thinking level (default: high)",
+    )
+    parser.add_argument(
+        "--pi-options",
+        default=None,
+        help="Additional Pi CLI options as JSON array (e.g. '[\"--verbose\"]')",
+    )
+    parser.add_argument(
+        "--previous-context",
+        default="",
+        help="Dismissed findings from prior iterations (passed to external tool)",
+    )
+    parser.add_argument(
+        "--discuss",
+        action="store_true",
+        default=False,
+        help="Discussion mode: debate disputed findings with counter-arguments",
+    )
+    parser.add_argument(
+        "--discussion-context",
+        default="",
+        help="The dispute exchange: findings + counter-arguments so far",
+    )
 
     args = parser.parse_args()
 
     # Load config.json — project > user > empty (first found wins, no merging)
     _config_candidates = [
-        Path(".claude") / "external-code-review" / "config.json",       # project-local
+        Path(".claude") / "external-code-review" / "config.json",  # project-local
         Path.home() / ".claude" / "external-code-review" / "config.json",  # user-global
     ]
     file_config = {}
@@ -301,7 +340,10 @@ def main():
                 print(f"Loaded config from {config_path}", file=sys.stderr)
                 break
             except Exception as e:
-                print(f"Warning: could not load config from {config_path}: {e}", file=sys.stderr)
+                print(
+                    f"Warning: could not load config from {config_path}: {e}",
+                    file=sys.stderr,
+                )
 
     # Validate pi_options (CLI arg is JSON string, config is list)
     cli_pi_options = None
@@ -309,31 +351,55 @@ def main():
         try:
             cli_pi_options = json.loads(args.pi_options)
         except json.JSONDecodeError:
-            print("Warning: --pi-options must be a JSON array, ignoring", file=sys.stderr)
+            print(
+                "Warning: --pi-options must be a JSON array, ignoring", file=sys.stderr
+            )
     raw_pi_options = _validate_pi_options(
-        cli_pi_options if cli_pi_options is not None else file_config.get("pi_options", None)
+        cli_pi_options
+        if cli_pi_options is not None
+        else file_config.get("pi_options", None)
     )
 
     # Validate pi_thinking
     _valid_thinking = {"off", "minimal", "low", "medium", "high", "xhigh"}
-    pi_thinking_val = args.pi_thinking if args.pi_thinking is not None else file_config.get("pi_thinking", "high")
+    pi_thinking_val = (
+        args.pi_thinking
+        if args.pi_thinking is not None
+        else file_config.get("pi_thinking", "high")
+    )
     if pi_thinking_val not in _valid_thinking:
-        print(f"Warning: invalid pi_thinking '{pi_thinking_val}', using 'high'", file=sys.stderr)
+        print(
+            f"Warning: invalid pi_thinking '{pi_thinking_val}', using 'high'",
+            file=sys.stderr,
+        )
         pi_thinking_val = "high"
 
     # Validate external_tool
     _valid_tools = {"auto", "codex", "gemini", "pi"}
-    ext_tool_val = args.external_tool if args.external_tool is not None else file_config.get("external_tool", "auto")
+    ext_tool_val = (
+        args.external_tool
+        if args.external_tool is not None
+        else file_config.get("external_tool", "auto")
+    )
     if ext_tool_val not in _valid_tools:
-        print(f"Warning: invalid external_tool '{ext_tool_val}', using 'auto'", file=sys.stderr)
+        print(
+            f"Warning: invalid external_tool '{ext_tool_val}', using 'auto'",
+            file=sys.stderr,
+        )
         ext_tool_val = "auto"
 
     config = ReviewConfig(
         branch=args.branch,
         external_tool=ext_tool_val,
-        codex_model=args.codex_model if args.codex_model is not None else file_config.get("codex_model", "gpt-5.2-codex"),
-        gemini_model=args.gemini_model if args.gemini_model is not None else file_config.get("gemini_model", ""),
-        pi_model=args.pi_model if args.pi_model is not None else file_config.get("pi_model", ""),
+        codex_model=args.codex_model
+        if args.codex_model is not None
+        else file_config.get("codex_model", "gpt-5.2-codex"),
+        gemini_model=args.gemini_model
+        if args.gemini_model is not None
+        else file_config.get("gemini_model", ""),
+        pi_model=args.pi_model
+        if args.pi_model is not None
+        else file_config.get("pi_model", ""),
         pi_thinking=pi_thinking_val,
         pi_options=raw_pi_options,
         previous_context=args.previous_context,
