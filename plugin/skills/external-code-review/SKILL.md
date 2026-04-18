@@ -157,7 +157,17 @@ Output reports the current branch, working-tree status, and commits ahead of the
 ${CLAUDE_SKILL_DIR}/scripts/gather_context.sh main
 ```
 
-Output has two sections — `=== commits ===` and `=== diff ===`. Pass the diff section to the review agents.
+The script writes the commit log and diff to a fresh `mktemp -d` directory (so concurrent sessions in different projects never collide) and prints a summary:
+
+```
+base: main
+commits: <N>
+commits_path: /tmp/external-code-review.XXXXXX/commits.txt
+diff_path: /tmp/external-code-review.XXXXXX/diff.patch
+diff_lines: <N>
+```
+
+Capture `diff_path` from the output. **Pass this path to review agents — do not inline the diff contents in their prompts.** Agents Read the path themselves, which keeps the orchestrator's context lean even for large diffs.
 
 ### 2. Run Phase 1: First Review (Agents)
 
@@ -182,7 +192,7 @@ documentation
 
 For each agent listed:
 1. Read `<dir>/<agent>.txt` with the Read tool
-2. Launch via the Agent tool with prompt = agent_prompt + "\n\nCode changes to review:\n" + git_diff
+2. Launch via the Agent tool with prompt = agent_prompt + "\n\nCode changes to review are in: `<diff_path>`. Read that file first, then analyze."
 
 Launch ALL resolved agents **in parallel** (single message, multiple Agent tool calls).
 
@@ -342,7 +352,7 @@ All skill operations run through static scripts in `${CLAUDE_SKILL_DIR}/scripts/
 | Script | Purpose |
 |--------|---------|
 | `check_branch.sh [base]` | Print current branch, working-tree status, commits ahead of base (default `main`). |
-| `gather_context.sh [base]` | Print `=== commits ===` log and `=== diff ===` against base. |
+| `gather_context.sh [base]` | Write commit log + diff against base to a fresh `mktemp -d`; print `diff_path`, `commits_path`, and line counts. |
 | `resolve_agents.sh` | Print the winning agent directory (project > user > built-in) and agent names. |
 | `resolve_config.sh` | Print the winning `config.json` path and contents (project > user > none). |
 | `run_review.py` | Run external review tool (Codex/Gemini/Pi). See options below. |
