@@ -128,6 +128,25 @@ Launch specialized agents simultaneously using the Agent tool. Agent set is reso
 - Agents: quality + implementation
 - Style/minor issues ignored
 
+## Safety & Best Practices
+
+### Git Command Safety
+
+**IMPORTANT: Never use `cd <dir> && git ...` pattern.** This changes directories and can execute hooks from the target directory, creating a security risk.
+
+**Always use `git -C <dir>`** to run git commands in a specific directory without changing the shell's working directory:
+
+```bash
+# ❌ WRONG - triggers hooks in the target directory
+cd /path/to/project && git add file && git commit -m "msg"
+
+# ✅ CORRECT - avoids changing directories and hooks
+git -C /path/to/project add file
+git -C /path/to/project commit -m "msg"
+```
+
+This applies to all git operations: `git -C` followed by the command you want to run.
+
 ## Workflow
 
 ### 0. Check Branch Status & Commit Changes
